@@ -20,6 +20,7 @@
 use anyhow::{bail, Context, Result};
 use std::io::Write;
 use std::process::{Command, Stdio};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::time::Duration;
 
 /// Default app name when the caller doesn't override.
@@ -430,24 +431,9 @@ Start-Sleep -Milliseconds 120
             focus_block = focus_block,
         );
 
-        let mut child = Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", "-"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context("Spawning PowerShell")?;
-
-        // PowerShell reads the script body from -Command -, so first feed the
-        // script, then the prompt text — but PowerShell can only read one
-        // stream from stdin. Workaround: write script to a temp file, run it
-        // with -File, and feed the prompt as the file's stdin.
-        // Simpler approach below: encode the script to base64 and use
-        // -EncodedCommand, leaving stdin free for the prompt.
-
-        // Drop the open child — restart with the encoded path.
-        drop(child);
-
+        // PowerShell can read either the script body or stdin from a single
+        // stream — to leave stdin free for the prompt text, we encode the
+        // script as UTF-16 LE base64 and pass it via -EncodedCommand.
         let mut wide: Vec<u16> = script.encode_utf16().collect();
         // PowerShell's -EncodedCommand expects UTF-16 LE -> base64.
         let mut bytes = Vec::with_capacity(wide.len() * 2);

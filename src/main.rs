@@ -68,9 +68,11 @@ struct Cli {
     branch: Option<String>,
 
     /// After each /stage-complete, auto-paste the next prompt into the target
-    /// GUI app (default: Claude desktop) using clipboard + AppleScript. macOS
-    /// only. Reliably drives long webhook pipelines without relying on the
-    /// agent voluntarily self-chaining.
+    /// GUI app (default: Claude desktop) using clipboard + simulated keys.
+    /// Reliably drives long webhook pipelines without relying on the agent
+    /// voluntarily self-chaining. macOS uses pbcopy + osascript; Linux uses
+    /// xclip/xsel + xdotool (X11) or wl-copy + wtype/ydotool (Wayland);
+    /// Windows uses Set-Clipboard + PowerShell SendKeys.
     #[arg(long, default_value_t = false)]
     auto_paste: bool,
 
