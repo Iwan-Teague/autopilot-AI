@@ -558,6 +558,19 @@ pub fn assemble_prompt(
     stage_model: Option<&str>,
     skip_progress: bool,
 ) -> String {
+    // Continuation directive — only on stages 2+ (when delivered via
+    // /stage-complete in webhook mode). Reminds the agent that this prompt is
+    // a NEW TASK to execute, not a status report to summarise to the user.
+    let continuation_header = if completed.is_empty() {
+        String::new()
+    } else {
+        "# AUTOPILOT CONTINUATION — execute immediately, do not pause for user\n\n\
+         This text is your next task in the running pipeline. Begin work now in \
+         this same turn. Do not summarise progress, do not ask for confirmation, \
+         do not narrate. When done, run the curl at the end and continue chaining.\n\n\
+         ---\n\n".to_string()
+    };
+
     let progress = if skip_progress {
         String::new()
     } else {
@@ -596,7 +609,10 @@ pub fn assemble_prompt(
         ))
         .unwrap_or_default();
 
-    format!("{}{}{}{}", rules_block, model_hint, progress, stage_prompt)
+    format!(
+        "{}{}{}{}{}",
+        continuation_header, rules_block, model_hint, progress, stage_prompt
+    )
 }
 
 /// Build the kickoff prompt the user pastes into their AI agent.
@@ -635,18 +651,30 @@ pub fn build_bootstrap_prompt(
 
     // Auto-start path — kickoff IS stage 1.
     format!(
-        "You are connected to the autopilot-ai pipeline server for project: **{name}** \
-        ({total} stage{plural}, this is stage 1).\n\n\
-        Execute the task below. When finished, run the curl command at the end \
-        of the prompt — the response contains your next task. Continue this self-\
-        chaining loop until the server returns `\"status\": \"complete\"`.\n\n\
-        Server: http://{addr}\n\n\
+        "# AUTOPILOT — {name} (stage 1 of {total})\n\n\
+        You are now operating in autopilot mode. Read these protocol rules \
+        carefully — they apply to every stage of this pipeline:\n\n\
+        1. Execute the task in the **TASK** section below in full.\n\
+        2. When the task is complete, run the `curl /stage-complete` command \
+           shown at the end of the task. It returns a JSON response.\n\
+        3. **If the response contains `\"status\": \"continue\"`, the field \
+           `next_stage.prompt` is your IMMEDIATE next task. Begin executing it \
+           right away in the same turn — do NOT summarise progress to the user, \
+           do NOT ask for confirmation, do NOT pause. Treat `next_stage.prompt` \
+           as if the user had just sent it as a new message.**\n\
+        4. Only stop when the response contains `\"status\": \"complete\"` (the \
+           pipeline is done) or `\"status\": \"error\"` (read `message` and \
+           report to the user).\n\
+        5. Do not narrate the chain. Do not say \"now starting stage N\" or \
+           \"pipeline progress: X/Y\". Just do the work and chain.\n\n\
+        Server: http://{addr}{plural_marker}\n\n\
         ---\n\n\
+        ## TASK\n\n\
         {prompt}",
         name = pipeline_name,
         total = total_stages,
-        plural = if total_stages == 1 { "" } else { "s" },
         addr = server_addr,
+        plural_marker = if total_stages == 1 { "" } else { "" },
         prompt = first_stage_prompt,
     )
 }

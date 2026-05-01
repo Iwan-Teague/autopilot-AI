@@ -139,16 +139,21 @@ output is fine there.
 Every prompt must end with this block (substituting the real stage ID and port):
 
 ```
-When you have fully completed the objectives above, run:
+When you have fully completed the objectives above, run this curl. Do NOT
+narrate the result back to the user — the response IS your next task.
+
 ```bash
 curl -s -X POST http://localhost:7432/stage-complete \
   -H "Content-Type: application/json" \
   -d '{"stage_id":"STAGE_ID","summary":"One sentence: what you built."}' | cat
 ```
-Read the response:
-- `"status": "continue"` → read `next_stage.prompt` and start it immediately
-- `"status": "complete"` → pipeline finished, you are done
-- `"status": "error"` → read `message` and fix the issue before retrying
+
+Then act on the response in this same turn, without pausing:
+- `"status": "continue"` → the field `next_stage.prompt` is your IMMEDIATE
+  next task. Start executing it now. Do not ask for user confirmation.
+  Do not paste it back to the user. Just begin.
+- `"status": "complete"` → the pipeline is finished, report success briefly.
+- `"status": "error"` → read `message`, fix the issue, retry the curl.
 ```
 
 The `summary` field is a single sentence describing what was built or tested —
