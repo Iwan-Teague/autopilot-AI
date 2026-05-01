@@ -160,8 +160,17 @@ async fn main() -> Result<()> {
     if let Some(app) = cli.target_app {
         config.target_app = Some(app);
     }
-    if config.auto_paste && !cfg!(target_os = "macos") {
-        anyhow::bail!("--auto-paste is currently macOS-only");
+    if config.auto_paste {
+        let support = if cfg!(target_os = "macos") {
+            "macOS — uses pbcopy + osascript"
+        } else if cfg!(target_os = "linux") {
+            "Linux — uses xclip/xsel + xdotool on X11, wl-copy + wtype/ydotool on Wayland"
+        } else if cfg!(target_os = "windows") {
+            "Windows — uses Set-Clipboard + PowerShell SendKeys"
+        } else {
+            anyhow::bail!("--auto-paste is unsupported on this OS");
+        };
+        tracing::info!("Auto-paste: {}", support);
     }
 
     // Branch check — refuse to start if the repo isn't on the expected branch.

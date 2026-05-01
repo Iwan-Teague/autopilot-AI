@@ -145,14 +145,34 @@ directive is. Pick the right mode:
 | Stages | Recommended mode |
 |---|---|
 | ≤ 8  | Webhook (default) — fine end-to-end |
-| 9+ on Claude desktop / Claude Code GUI | **Webhook + `--auto-paste`** (macOS) — binary drives the chat by simulating clipboard paste + send into the app on every stage. The next stage arrives as a fresh user message, eliminating the "milestone offramp" |
+| 9+ on a chat GUI (Claude desktop, Claude Code, Codex, ChatGPT, Cursor…) | **Webhook + `--auto-paste`** — binary drives the chat by simulating clipboard paste + send into the app on every stage. The next stage arrives as a fresh user message, eliminating the "milestone offramp" |
 | 9+ headless | **API mode** (`--interface api`, requires `ANTHROPIC_API_KEY`) — binary calls the API directly, no UI agent involved |
 | > 30 | Split into sequential mini-pipelines |
 
-`--auto-paste` requires macOS and a one-time grant of Accessibility
-permission for the terminal that launches the binary (System Settings →
-Privacy & Security → Accessibility). On first failure the binary
-prints a hint pointing there.
+`--auto-paste` runs on macOS, Linux (X11 or Wayland), and Windows. It
+copies the prompt, activates the target app, then sends paste + send.
+Per-platform requirements:
+
+| OS | Tools / permissions |
+|---|---|
+| macOS   | Bundled `pbcopy` + `osascript`. First run grants Accessibility permission to your terminal (System Settings → Privacy & Security → Accessibility). |
+| Linux X11 | `xclip` (or `xsel`) + `xdotool`. `apt install xclip xdotool`. |
+| Linux Wayland | `wl-copy` + `wtype` (or `ydotool` daemon). `apt install wl-clipboard wtype`. Wayland forbids programmatic window activation, so the user has 1.5s to focus the target app each stage. |
+| Windows | Bundled PowerShell. No installs needed. |
+
+`--target-app` picks the app by display-name substring. Default
+`"Claude"`. Common values:
+
+* `"Claude"` — Claude desktop
+* `"Codex"` — OpenAI Codex desktop (where it ships as a window)
+* `"Claude Code"` — Claude Code
+* `"ChatGPT"` — ChatGPT desktop
+* `"Cursor"` — Cursor IDE chat panel
+
+For Codex headlessly, prefer `--interface cli` (spawns `codex -p`
+subprocess per stage — fully driven by the binary, no GUI involved).
+Auto-paste is the right pick when the user wants to watch work happen
+in the desktop app.
 
 Tell the user which mode is recommended for their pipeline length in
 the Step 4 confirmation summary. For >8 stages on the Claude desktop

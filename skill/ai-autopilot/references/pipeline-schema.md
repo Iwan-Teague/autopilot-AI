@@ -27,19 +27,28 @@ Override at runtime with `--branch X`. Omit (or null) to operate on
 whatever branch is currently checked out. The kickoff summary always
 shows the active branch regardless of whether it's pinned.
 
-`auto_paste` (optional, default `false`) — macOS only. After every
+`auto_paste` (optional, default `false`) — cross-platform. After every
 `/stage-complete`, the binary copies the next stage prompt to the
-clipboard, activates the target GUI app, and sends `cmd+v` then
-`cmd+return`. Each new stage arrives as a fresh chat turn instead of
-hidden inside an HTTP response, so the AI agent has no "summarise mid-
-pipeline" offramp. Recommended for any pipeline with >8 stages running
-on the Claude desktop app or Claude Code GUI. Override at runtime
-with `--auto-paste`. Requires Accessibility permission on the terminal
-launching the binary.
+clipboard, activates the target GUI app, and sends paste + send. Each
+new stage arrives as a fresh chat turn instead of hidden inside an
+HTTP response, so the AI agent has no "summarise mid-pipeline"
+offramp. Recommended for any pipeline >8 stages on a chat GUI. Toggle
+at runtime with `--auto-paste`.
 
-`target_app` (optional, default `"Claude"`) — name of the app
-`auto_paste` activates and pastes into. Match your installed app's
-display name (Claude desktop is `"Claude"`).
+Platform requirements:
+* **macOS** — bundled `pbcopy` + `osascript`. First run requires
+  Accessibility permission for the launching terminal.
+* **Linux X11** — `xclip` (or `xsel`) + `xdotool`.
+* **Linux Wayland** — `wl-copy` + `wtype` (or `ydotool` daemon). User
+  must focus the target app within 1.5s of each stage start (Wayland
+  blocks programmatic window activation).
+* **Windows** — bundled PowerShell + Set-Clipboard + SendKeys. No
+  installs.
+
+`target_app` (optional, default `"Claude"`) — display-name substring of
+the app `auto_paste` should activate. Common values: `"Claude"`,
+`"Codex"`, `"Claude Code"`, `"ChatGPT"`, `"Cursor"`. Match the title
+that appears in your OS window manager.
 
 ## Stage object
 
