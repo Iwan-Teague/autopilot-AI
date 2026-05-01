@@ -1,0 +1,46 @@
+[package]
+name = "autopilot-ai"
+version = "0.1.0"
+edition = "2021"
+description = "Automated AI prompt pipeline runner — monitors chat completion and injects the next prompt"
+authors = ["Iwan Teague"]
+
+[[bin]]
+name = "autopilot"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
+# Serialization / deserialization (pipeline config, state)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# HTTP client for Anthropic API (SSE stream)
+reqwest = { version = "0.12", features = ["stream", "json"] }
+futures-util = "0.3"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Lazy static initialisation
+once_cell = "1"
+
+# Async trait support
+async-trait = "0.1"
+
+# HTTP server for webhook self-chain mode
+axum = "0.7"
+tower = "0.4"
+
+[profile.release]
+opt-level = 3

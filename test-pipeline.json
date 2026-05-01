@@ -1,0 +1,27 @@
+{
+  "name": "Smoke Test",
+  "global_rules": [],
+  "interface": "webhook",
+  "provider": "auto",
+  "state_path": "test-state.json",
+  "stages": [
+    {
+      "id": "test-stage-1",
+      "phase": "foundation",
+      "summary": "Stage 1 — confirm server connection",
+      "prompt": "## Test Stage 1 of 3\n\nThis is a smoke test — no real work needed. Just confirm the connection is working.\n\nRun this and read the JSON response:\n\n```bash\ncurl -s -X POST http://localhost:7432/stage-complete \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"stage_id\":\"test-stage-1\",\"summary\":\"Stage 1 connection confirmed.\"}' | cat\n```\n\nIf `status` is `continue`, start `next_stage.prompt` immediately.\nIf `status` is `complete`, you are done.\nIf `status` is `error`, read `message` and retry."
+    },
+    {
+      "id": "test-stage-2",
+      "phase": "implementation",
+      "summary": "Stage 2 — verify rolling context arrives",
+      "prompt": "## Test Stage 2 of 3\n\nSmoke test stage 2. If you can see a 'Progress so far' block above this prompt, the rolling context is working correctly.\n\nRun this and read the JSON response:\n\n```bash\ncurl -s -X POST http://localhost:7432/stage-complete \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"stage_id\":\"test-stage-2\",\"summary\":\"Stage 2 rolling context verified.\"}' | cat\n```\n\nIf `status` is `continue`, start `next_stage.prompt` immediately.\nIf `status` is `complete`, you are done.\nIf `status` is `error`, read `message` and retry."
+    },
+    {
+      "id": "test-stage-3",
+      "phase": "testing",
+      "summary": "Stage 3 — pipeline complete",
+      "prompt": "## Test Stage 3 of 3 (Final)\n\nLast smoke test stage. Run the completion command and the pipeline will shut down.\n\n```bash\ncurl -s -X POST http://localhost:7432/stage-complete \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"stage_id\":\"test-stage-3\",\"summary\":\"All 3 smoke test stages passed.\"}' | cat\n```\n\nIf `status` is `complete`, the pipeline is finished — you are done."
+    }
+  ]
+}

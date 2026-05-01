@@ -1,0 +1,4 @@
+/target
+*-state.json
+autopilot-summary.md
+.DS_Store

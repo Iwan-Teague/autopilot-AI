@@ -1,0 +1,284 @@
+---
+name: ai-autopilot
+description: >
+  Automated AI prompt pipeline builder for locally-running AI agents. Use this
+  skill when the user wants to run a long, multi-stage project through an AI
+  agent autonomously — without needing to be present for each prompt. The skill
+  reads a project specification document (.md), extracts rules and pipeline
+  stages (foundation → implementation → testing), generates all prompts, shows
+  the user a summary for confirmation, then hands off to the autopilot Rust
+  binary which manages the pipeline from there.
+
+  Works with any locally-running AI that has shell access: Claude Code, Codex,
+  Ollama, LM Studio, or any agent that can run a curl command.
+
+  Trigger whenever you hear: "run this automatically", "prompt pipeline",
+  "autopilot", "hands-free project build", "keep prompting until done",
+  "auto-run my spec", or any request to execute a multi-hour project doc
+  without the user staying at the keyboard.
+---
+
+# ai-autopilot Skill
+
+Turns a project specification document into an ordered prompt pipeline and
+drives a local AI agent through it end-to-end — no human needed after the
+first prompt is pasted.
+
+## How it works
+
+```
+1. User provides a project spec (.md)
+2. You parse it → extract rules + pipeline stages
+3. You generate a prompt for each stage
+4. You show the user a summary and ask for confirmation
+5. You write pipeline.json and build the Rust binary
+6. User pastes the first prompt into their AI agent
+7. The agent self-chains through every stage via the local HTTP server
+```
+
+## Interfaces
+
+Three modes — all target locally-running AI, no browser automation:
+
+| Mode | How it works | Best for |
+|---|---|---|
+| **webhook** (default) | Binary serves prompts via HTTP. AI runs `curl /stage-complete` when done, gets next prompt in response. AI self-chains. | Claude Code, Codex, any agent with shell access |
+| **api** | Binary calls the provider REST API directly, manages the full conversation. | Headless / scripted use |
+| **cli** | Binary spawns `claude -p` or `codex -p` as a subprocess per stage. | Simple single-turn agents |
+
+Auto-detection tries webhook → API → CLI in that order.
+
+---
+
+## Step 1 — Read and understand the spec document
+
+Ask for the project spec file if not provided. Once you have it:
+
+- Read the full document.
+- Identify the **Project Rules** section — constraints, style guides, and
+  requirements that must apply to every stage. If there is no explicit rules
+  section, infer 3–6 rules from the document's goals and constraints.
+- Identify **all project sections** — features, modules, or components to build.
+
+---
+
+## Step 2 — Generate the prompt pipeline
+
+Organise stages into exactly three phases in order:
+
+### Phase 1: Foundation
+One stage (occasionally two) covering:
+- Project scaffolding and directory structure
+- Core dependencies and configuration
+- Shared infrastructure (data models, DB schema, API clients, auth, etc.)
+
+The foundation must be complete enough that implementation stages can build on
+it without revisiting setup decisions.
+
+### Phase 2: Implementation
+One stage per major section/feature from the spec. Each prompt should:
+- State clearly what it is building (name the spec section)
+- Assume the foundation stage is already in place
+- Have an unambiguous definition of done
+
+Split large sections into multiple stages rather than making one stage too broad.
+
+### Phase 3: Testing
+One or more stages covering:
+- Unit tests for core logic
+- Integration tests for cross-component behaviour
+- End-to-end tests or smoke-test checklist
+- Build/CI verification
+
+The final testing stage should verify the project is in a working, usable state.
+
+---
+
+## Step 3 — Compose each prompt
+
+Every prompt must include:
+
+1. `## Context` — which phase/stage this is and what preceded it
+2. `## Objective` — exactly what to build
+3. `## Acceptance criteria` — binary pass/fail checks (file exists, tests pass, etc.)
+4. A reference to the relevant spec section(s) by name
+
+Global rules are prepended automatically by the binary — do not repeat them
+in individual stage prompts.
+
+### Completion marker
+
+Every prompt must end with this block (substituting the real stage ID and port):
+
+```
+When you have fully completed the objectives above, run:
+```bash
+curl -s -X POST http://localhost:7432/stage-complete \
+  -H "Content-Type: application/json" \
+  -d '{"stage_id":"STAGE_ID","summary":"One sentence: what you built."}' | cat
+```
+Read the response:
+- `"status": "continue"` → read `next_stage.prompt` and start it immediately
+- `"status": "complete"` → pipeline finished, you are done
+- `"status": "error"` → read `message` and fix the issue before retrying
+```
+
+The `summary` field is a single sentence describing what was built or tested —
+it's written to `autopilot-summary.md` as each stage completes. Keep it factual
+and brief (the full response is in the chat history).
+
+In webhook mode the binary appends the bootstrap + curl instructions to the
+initial prompt automatically. Stages 2+ receive their curl instructions as part
+of the prompt text returned in the server response.
+
+---
+
+## Step 4 — Show summary and get confirmation
+
+Present the full pipeline before writing any files:
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PROJECT AUTOPILOT — <project name>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Global rules (<N> rules prepended to every prompt):
+    1. <rule>
+    ...
+
+  ── Foundation ──
+   1. [foundation-setup]  <summary>
+
+  ── Implementation ──
+   2. [impl-<name>]       <summary>
+   ...
+
+  ── Testing ──
+   N. [test-suite]        <summary>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Stages: <N>  |  Interface: webhook (auto)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Does this look right? Any stages to add, remove, or rename?
+Once confirmed I'll generate pipeline.json and kick it off.
+```
+
+Wait for explicit confirmation before proceeding.
+
+---
+
+## Step 5 — Generate pipeline.json
+
+Run the parser script:
+
+```bash
+python3 /path/to/skill/ai-autopilot/scripts/parse_pipeline.py \
+  --spec <path-to-spec.md> \
+  --output pipeline.json
+```
+
+Or write pipeline.json directly. Structure:
+
+```json
+{
+  "name": "My Project",
+  "global_rules": ["Rule 1", "Rule 2"],
+  "interface": "webhook",
+  "provider": "auto",
+  "state_path": "autopilot-state.json",
+  "stages": [
+    {
+      "id": "foundation-setup",
+      "phase": "foundation",
+      "summary": "Scaffold project, install deps, create core structure",
+      "prompt": "## Context\n...\n## Objective\n...\n## Acceptance criteria\n...\nWhen you have finished this stage, output exactly:\nSTAGE COMPLETE: foundation-setup"
+    }
+  ]
+}
+```
+
+See `references/pipeline-schema.md` for the full schema.
+
+---
+
+## Step 6 — Build and run
+
+Build once (or after source changes):
+
+```bash
+cd /Users/iwan/Desktop/autopilot-ai && cargo build --release 2>&1
+```
+
+**Webhook mode — recommended for Claude Code / Codex / any local agent:**
+
+```bash
+./target/release/autopilot --pipeline pipeline.json
+```
+
+The binary prints the first prompt. Paste it into your AI agent. It will work
+through every stage automatically, calling the local server after each one.
+
+Check progress at any time:
+```bash
+curl -s http://localhost:7432/status | python3 -m json.tool
+```
+
+Resume an interrupted run:
+```bash
+autopilot --pipeline pipeline.json --resume
+```
+
+Force a specific interface or provider:
+```bash
+autopilot --pipeline pipeline.json --interface api
+autopilot --pipeline pipeline.json --interface cli
+autopilot --pipeline pipeline.json --port 8080
+```
+
+---
+
+## Provider auto-detection
+
+The binary detects which AI provider to use automatically — no configuration
+needed for common setups. Detection order:
+
+1. **API keys in environment** (first match wins):
+
+| Env var | Provider | Default model |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic | `claude-opus-4-6` |
+| `OPENAI_API_KEY` | OpenAI | `gpt-4o` |
+| `MISTRAL_API_KEY` | Mistral | `mistral-large-latest` |
+| `GROQ_API_KEY` | Groq | `llama-3.3-70b-versatile` |
+| `TOGETHER_API_KEY` | Together AI | `meta-llama/Llama-3-70b-chat-hf` |
+
+2. **Local services** — Ollama (port 11434), LM Studio (port 1234)
+3. **Local CLIs** — `claude`, `codex`
+
+Override in pipeline.json when needed:
+```json
+{ "provider": "ollama", "model": "llama3.2" }
+{ "provider": "custom", "api_base_url": "http://my-server:8080", "model": "my-model" }
+```
+
+Or via environment:
+- `AUTOPILOT_MODEL` — override model for any provider
+- `OLLAMA_HOST` — Ollama base URL (default: `http://localhost:11434`)
+- `RUST_LOG=debug` — verbose logging
+
+---
+
+## Writing good stage prompts
+
+- **Be specific about file paths** — "create `src/auth/mod.rs`" not "the auth module"
+- **Reference the spec** — "as described in the Authentication section"
+- **State what already exists** — "the DB schema from Foundation is in `schema.sql`"
+- **Acceptance criteria must be binary** — "all tests pass" or "file X exists", not "looks right"
+- **Keep stages independent** — each should work given only the foundation
+
+---
+
+## References
+
+- `references/pipeline-schema.md` — full JSON schema with examples
+- `references/example-spec.md` — example project spec to try
+- Rust source: `/Users/iwan/Desktop/autopilot-ai/src/`

@@ -1,0 +1,8 @@
+{
+  "name": "ai-autopilot",
+  "version": "0.1.0",
+  "description": "Turns a project spec Markdown file into a staged prompt pipeline and drives a local AI agent through it end-to-end via a local webhook server.",
+  "skills": [
+    "ai-autopilot"
+  ]
+}
