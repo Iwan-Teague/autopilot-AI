@@ -93,21 +93,34 @@ Ask for the project spec file if not provided. Once you have it:
   section, infer 3–6 rules from the document's goals and constraints.
 - Identify **all project sections** — features, modules, or components to build.
 
-### Always-on output rules
+### Always-on output rules — caveman ultra mode
 
-Append these two rules to `global_rules` on every pipeline (cuts ~30%
-of output tokens by suppressing model preamble/recap):
+Append these three rules to `global_rules` on every pipeline. They ship
+in the cacheable `system` block (Anthropic API mode reads them at 10%
+input price after stage 1), and together they cut roughly half of the
+output tokens a default agent would emit.
 
-1. *"Be terse. Output code, diffs, file edits, or shell commands only — no
-   preamble, no recap, no narration. The required `curl /stage-complete`
-   call at the end of each stage (with a one-sentence factual summary) is
-   the only exception — always include it."*
-2. *"For modifications under ~50 lines, output a unified diff or use targeted
-   edits — do not paste full file contents. Full files are fine for new
-   files or large rewrites."*
-
-These ship in the cacheable `system` block, so on Anthropic API mode they
-cost almost nothing after stage 1.
+1. *"Caveman ultra mode for all chat output. Drop articles (a/an/the),
+   fillers (just/really/basically/simply/actually), pleasantries
+   (sure/of course/I'll happily/let me). Fragments fine. Pattern:
+   `[thing] [action] [reason]. [next step].` Abbreviate aggressively
+   (DB/cfg/req/res/fn/impl/auth/lib/var). Arrows for causality (X → Y).
+   One word when one word enough. Pre-existing technical terms stay
+   exact. EXCEPTIONS — these stay normal English: source code, commit
+   messages, READMEs / docs / comments, the stage-complete summary
+   sentence, and any user-facing text that ships in the project itself.
+   Examples — Yes: `bug in auth middleware. token check uses < not <=.
+   fix:` followed by diff. No: `I noticed there's an issue with the
+   authentication middleware where the token expiry check is using a
+   strict less-than comparison instead of...`"*
+2. *"Output code, diffs, file edits, or shell commands only — no
+   preamble, no recap, no plan announcement, no progress narration, no
+   trailing summary. The required `curl /stage-complete` call at the end
+   of each stage is the only exception. Its `summary` field is one
+   factual sentence (normal English), nothing else."*
+3. *"For modifications under ~50 lines, output a unified diff or use
+   targeted edits — never paste full file contents. Full files are only
+   for new files or large rewrites."*
 
 ---
 
