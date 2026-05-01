@@ -163,13 +163,14 @@ of the prompt text returned in the server response.
 
 ## Step 3.5 — Per-stage model tiering (optional, opt-in)
 
-After generating stages, ask the user:
+**You must ask this question before showing the Step 4 summary.** Don't
+assume the answer either way — wait for an explicit reply.
 
 > "Enable per-stage model tiering? Cheap models run scaffolding + tests;
 > smart models run implementation. Saves cost on long pipelines. [y/N]"
 
-**Default no.** If the user says no (or doesn't answer), skip this step
-entirely — every stage runs on whatever single model is configured.
+If the user says no, skip the rest of this step — every stage runs on
+whatever single model is configured. If the user says yes, proceed below.
 
 If the user says yes:
 
