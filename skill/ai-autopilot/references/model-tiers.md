@@ -45,6 +45,10 @@ Override per-stage based on prompt content:
 
 1. Run `python3 skill/ai-autopilot/scripts/detect_models.py` — get JSON list of
    `{provider, model, tier, source}` available locally.
+   * Add `--host claude|codex|chatgpt|cursor|claude_code` when the AI agent
+     is running inside a GUI chat app. Without that flag, the detector only
+     finds API keys / local services / CLIs in PATH — it returns empty inside
+     a GUI host because none of those are exposed there.
 2. If the list is empty: tell user, fall back to no tiering.
 3. Pick the cheapest model per tier present:
    - `light_model` = first model in detect output with `tier == "light"`

@@ -337,11 +337,25 @@ whatever single model is configured. If the user says yes, proceed below.
 
 If the user says yes:
 
-1. Run the detector:
+1. Run the detector — pass `--host <name>` when the agent is running in
+   a GUI chat app (from Step 0a) so the detector returns that host's
+   in-app model lineup. Without `--host`, the detector only sees env
+   API keys, Ollama / LM Studio, and CLI tools — which yields nothing
+   inside Claude desktop / Claude Code / Codex / etc:
    ```bash
+   # CLI agent or headless API key set:
    python3 /path/to/skill/ai-autopilot/scripts/detect_models.py
+
+   # GUI agent (use the right host name):
+   python3 /path/to/skill/ai-autopilot/scripts/detect_models.py --host claude
+   python3 /path/to/skill/ai-autopilot/scripts/detect_models.py --host codex
+   python3 /path/to/skill/ai-autopilot/scripts/detect_models.py --host chatgpt
+   python3 /path/to/skill/ai-autopilot/scripts/detect_models.py --host cursor
    ```
    It emits JSON: `[{provider, model, tier, source}, ...]`.
+   Note that GUI-host entries are advisory — in webhook mode the binary
+   can only suggest "/model X" via the prompt hint; the agent (or user)
+   has to honour it.
 2. If the output is empty, tell the user no models were detected and fall
    back to no tiering (don't fail the pipeline).
 3. Otherwise pick one model per tier:

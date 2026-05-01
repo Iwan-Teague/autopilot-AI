@@ -11,10 +11,16 @@ Probes (each is best-effort, failures are silent):
   • Ollama:   GET http://localhost:11434/api/tags → installed models.
   • LM Studio: GET http://localhost:1234/v1/models → loaded models.
   • CLIs:     `which claude`, `which codex` → enables CLI subprocess mode.
+  • GUI host: `--host claude|codex|chatgpt|cursor|claude_code` → adds the
+    model lineup that host typically exposes via in-app picker. Use this
+    when the agent runs inside a chat GUI (no API key in env, no CLI in
+    PATH) — auto-paste mode in webhook can advise these models via the
+    prompt hint even though the binary can't switch them directly.
 
 Usage:
-  python3 detect_models.py            # JSON to stdout
-  python3 detect_models.py --pretty   # human-readable
+  python3 detect_models.py                       # env / local probes only
+  python3 detect_models.py --host claude         # also list Claude desktop's lineup
+  python3 detect_models.py --host claude --pretty
 """
 
 from __future__ import annotations
@@ -162,6 +168,62 @@ def probe_lm_studio() -> list[dict]:
     return out
 
 
+def gui_host_models(host: str) -> list[dict]:
+    """Model lineups offered by common chat-GUI hosts. Used when the agent
+    runs inside an app (no env key, no CLI in PATH) but still has access to
+    a model picker. Tier mapping follows the same conventions as the API
+    detection paths."""
+    HOSTS: dict[str, tuple[str, list[tuple[str, str]]]] = {
+        # host_key:   (provider_label, [(model_id, tier), ...])
+        "claude": ("anthropic", [
+            ("claude-opus-4-7",   "heavy"),
+            ("claude-sonnet-4-6", "mid"),
+            ("claude-haiku-4-5",  "light"),
+        ]),
+        "claude_code": ("anthropic", [
+            ("claude-opus-4-7",   "heavy"),
+            ("claude-sonnet-4-6", "mid"),
+            ("claude-haiku-4-5",  "light"),
+        ]),
+        "codex": ("openai", [
+            ("o1",          "heavy"),
+            ("gpt-5",       "mid"),
+            ("gpt-5-mini",  "light"),
+        ]),
+        "chatgpt": ("openai", [
+            ("gpt-5-pro",   "heavy"),
+            ("gpt-5",       "mid"),
+            ("gpt-5-mini",  "light"),
+            ("gpt-4o-mini", "light"),
+        ]),
+        "cursor": ("mixed", [
+            ("claude-opus-4-7",   "heavy"),
+            ("claude-sonnet-4-6", "mid"),
+            ("gpt-5",             "mid"),
+            ("gpt-5-mini",        "light"),
+        ]),
+    }
+    key = host.lower().replace("-", "_").replace(" ", "_")
+    if key not in HOSTS:
+        # Be forgiving: try a substring match so "Claude Desktop" → "claude".
+        for candidate in HOSTS:
+            if candidate in key or key in candidate:
+                key = candidate
+                break
+        else:
+            return []
+    provider, models = HOSTS[key]
+    return [
+        {
+            "provider": provider,
+            "model": model,
+            "tier": tier,
+            "source": f"gui:{key}",
+        }
+        for model, tier in models
+    ]
+
+
 def probe_clis() -> list[dict]:
     out = []
     if shutil.which("claude"):
@@ -193,10 +255,17 @@ def probe_clis() -> list[dict]:
     return out
 
 
-def detect() -> list[dict]:
+def detect(gui_host: str | None = None) -> list[dict]:
     seen: set[tuple[str, str]] = set()
     result: list[dict] = []
-    for entry in probe_env_keys() + probe_ollama() + probe_lm_studio() + probe_clis():
+    sources = (
+        probe_env_keys()
+        + probe_ollama()
+        + probe_lm_studio()
+        + probe_clis()
+        + (gui_host_models(gui_host) if gui_host else [])
+    )
+    for entry in sources:
         key = (entry["provider"], entry["model"])
         if key in seen:
             continue
@@ -206,13 +275,29 @@ def detect() -> list[dict]:
     return result
 
 
+def parse_host_arg(argv: list[str]) -> str | None:
+    """Parse --host VALUE or --host=VALUE out of argv. Returns None if absent."""
+    for i, a in enumerate(argv):
+        if a.startswith("--host="):
+            return a.split("=", 1)[1]
+        if a == "--host" and i + 1 < len(argv):
+            return argv[i + 1]
+    return None
+
+
 def main() -> int:
     pretty = "--pretty" in sys.argv
-    models = detect()
+    gui_host = parse_host_arg(sys.argv)
+    models = detect(gui_host=gui_host)
     if pretty:
         if not models:
             print("No AI models detected.", file=sys.stderr)
-            print("Set an API key, run Ollama/LM Studio, or install `claude`/`codex`.", file=sys.stderr)
+            print(
+                "Fixes: set an API key (ANTHROPIC_API_KEY etc), run Ollama / LM Studio, "
+                "install `claude`/`codex`, or pass --host claude|codex|chatgpt|cursor "
+                "if the agent is running in a GUI chat app.",
+                file=sys.stderr,
+            )
             return 1
         by_tier: dict[str, list[dict]] = {t: [] for t in TIERS}
         for m in models:
