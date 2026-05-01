@@ -599,21 +599,55 @@ pub fn assemble_prompt(
     format!("{}{}{}{}", rules_block, model_hint, progress, stage_prompt)
 }
 
-pub fn build_bootstrap_prompt(server_addr: &str, port: u16, pipeline_name: &str) -> String {
+/// Build the kickoff prompt the user pastes into their AI agent.
+///
+/// Two flavours, controlled by `bootstrap_check`:
+/// * `true`  — legacy `POST /ready` handshake; AI verifies the server is up,
+///   gets stage 1 in the JSON response, then begins. Useful on first wire-up.
+/// * `false` (default) — the kickoff prompt is stage 1 directly, with a one-
+///   paragraph preamble explaining the self-chaining protocol. Saves the
+///   round-trip and the tokens spent on the ceremony.
+pub fn build_bootstrap_prompt(
+    server_addr: &str,
+    port: u16,
+    pipeline_name: &str,
+    total_stages: usize,
+    first_stage_prompt: &str,
+    bootstrap_check: bool,
+) -> String {
+    if bootstrap_check {
+        return format!(
+            "You are connected to the autopilot-ai pipeline server for project: **{name}**\n\n\
+            To begin, confirm the connection and receive your first task by running:\n\n\
+            ```bash\n\
+            curl -s -X POST http://localhost:{port}/ready \\\n  \
+              -H \"Content-Type: application/json\" \\\n  \
+              -d '{{\"ai\": \"claude-code\"}}' | cat\n\
+            ```\n\n\
+            Read the JSON response. The field `first_stage.prompt` contains your first task.\n\
+            Execute it fully, then report completion using the instructions at the end of that prompt.\n\n\
+            Server: http://{addr}",
+            name = pipeline_name,
+            port = port,
+            addr = server_addr,
+        );
+    }
+
+    // Auto-start path — kickoff IS stage 1.
     format!(
-        "You are connected to the autopilot-ai pipeline server for project: **{name}**\n\n\
-        To begin, confirm the connection and receive your first task by running:\n\n\
-        ```bash\n\
-        curl -s -X POST http://localhost:{port}/ready \\\n  \
-          -H \"Content-Type: application/json\" \\\n  \
-          -d '{{\"ai\": \"claude-code\"}}' | cat\n\
-        ```\n\n\
-        Read the JSON response. The field `first_stage.prompt` contains your first task.\n\
-        Execute it fully, then report completion using the instructions at the end of that prompt.\n\n\
-        Server: http://{addr}",
+        "You are connected to the autopilot-ai pipeline server for project: **{name}** \
+        ({total} stage{plural}, this is stage 1).\n\n\
+        Execute the task below. When finished, run the curl command at the end \
+        of the prompt — the response contains your next task. Continue this self-\
+        chaining loop until the server returns `\"status\": \"complete\"`.\n\n\
+        Server: http://{addr}\n\n\
+        ---\n\n\
+        {prompt}",
         name = pipeline_name,
-        port = port,
+        total = total_stages,
+        plural = if total_stages == 1 { "" } else { "s" },
         addr = server_addr,
+        prompt = first_stage_prompt,
     )
 }
 

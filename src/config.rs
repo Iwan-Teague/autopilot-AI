@@ -44,6 +44,14 @@ pub struct PipelineConfig {
     #[serde(default = "default_stage_timeout")]
     pub stage_timeout_secs: u64,
 
+    /// When true, the kickoff prompt is a `POST /ready` handshake — the AI
+    /// pings the server first to verify connectivity, gets stage 1 in the
+    /// response, and starts executing. Useful the first time you wire up an
+    /// agent. When false (default), the kickoff prompt IS stage 1 directly,
+    /// saving the round-trip and the tokens spent on the ceremony.
+    #[serde(default)]
+    pub bootstrap_check: bool,
+
     /// Where runtime state is persisted for resume support.
     #[serde(default = "default_state_path")]
     pub state_path: PathBuf,

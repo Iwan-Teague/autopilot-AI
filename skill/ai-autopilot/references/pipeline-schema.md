@@ -10,9 +10,16 @@ The `pipeline.json` file is the contract between the skill and the Rust binary.
   "global_rules": ["array of strings — prepended to every prompt"],
   "interface": "auto | api | cli | accessibility",
   "state_path": "path/to/autopilot-state.json",
+  "bootstrap_check": false,
   "stages": [ /* array of Stage objects */ ]
 }
 ```
+
+`bootstrap_check` (optional, default `false`) — when `true`, the kickoff
+prompt is a `POST /ready` handshake the AI runs before getting stage 1.
+Useful for verifying a new agent works end-to-end. When `false`, the
+kickoff prompt IS stage 1 directly — saves a round trip and the tokens
+spent on the ceremony.
 
 ## Stage object
 

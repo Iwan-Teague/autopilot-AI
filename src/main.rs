@@ -54,6 +54,11 @@ struct Cli {
     #[arg(long)]
     model: Option<String>,
 
+    /// Use the legacy `POST /ready` bootstrap handshake. Default is to skip it
+    /// — the kickoff prompt is stage 1 directly, saving a round trip.
+    #[arg(long, default_value_t = false)]
+    bootstrap_check: bool,
+
     /// Verbose logging.
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
@@ -119,6 +124,11 @@ async fn main() -> Result<()> {
         config.model = Some(model);
     }
 
+    // CLI flag turns the bootstrap handshake on for this run.
+    if cli.bootstrap_check {
+        config.bootstrap_check = true;
+    }
+
     // Auto-detection: webhook is now the preferred mode for desktop use.
     if config.interface == InterfaceHint::Auto {
         // Prefer webhook (works everywhere Claude can run shell commands).
@@ -159,16 +169,41 @@ async fn run_webhook(config: PipelineConfig, state: RunState, port: u16) -> Resu
 
     print_summary(&config);
 
+    // Build the assembled stage-1 prompt now (server hasn't moved past it yet).
+    // This is what the AI actually executes — embedded in the kickoff when
+    // bootstrap_check is off, or fetched via POST /ready when on.
+    let first_stage = &config.stages[current];
+    let first_completed: Vec<(&config::StageState, &config::Stage)> = state.stages[..current]
+        .iter()
+        .zip(config.stages[..current].iter())
+        .collect();
+    let first_prompt = server::assemble_prompt(
+        &config.global_rules,
+        &first_stage.prompt,
+        &first_completed,
+        first_stage.model.as_deref(),
+        first_stage.skip_progress,
+    );
+
     // Start the local HTTP server.
     let (addr, done_rx) = server::start(config.clone(), state, port).await
         .context("Starting webhook server")?;
 
-    // Print the bootstrap prompt — user pastes this once to kick things off.
-    // The AI POSTs to /ready, which confirms connectivity and returns stage 1.
-    let bootstrap = server::build_bootstrap_prompt(&addr, port, &config.name);
+    let bootstrap = server::build_bootstrap_prompt(
+        &addr,
+        port,
+        &config.name,
+        total,
+        &first_prompt,
+        config.bootstrap_check,
+    );
 
     println!("{}", "━".repeat(70));
-    println!("  PASTE THIS INTO YOUR AI AGENT TO BEGIN");
+    if config.bootstrap_check {
+        println!("  PASTE THIS INTO YOUR AI AGENT TO BEGIN  (bootstrap-check ON)");
+    } else {
+        println!("  PASTE THIS INTO YOUR AI AGENT TO BEGIN  (auto-start, no /ready handshake)");
+    }
     println!("{}", "━".repeat(70));
     println!();
     println!("{}", bootstrap);

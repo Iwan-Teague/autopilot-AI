@@ -155,9 +155,17 @@ The `summary` field is a single sentence describing what was built or tested —
 it's written to `autopilot-summary.md` as each stage completes. Keep it factual
 and brief (the full response is in the chat history).
 
-In webhook mode the binary appends the bootstrap + curl instructions to the
-initial prompt automatically. Stages 2+ receive their curl instructions as part
-of the prompt text returned in the server response.
+In webhook mode the binary builds the kickoff prompt automatically:
+
+* **Default (auto-start):** the kickoff prompt IS stage 1, with a one-paragraph
+  preamble explaining the self-chain protocol. The AI reads it and starts
+  executing — no `/ready` handshake, one fewer round trip, fewer tokens.
+* **Opt-in `bootstrap_check: true`** (or `--bootstrap-check` CLI flag): the
+  kickoff is a `POST /ready` handshake. The AI verifies the connection first,
+  receives stage 1 in the JSON response, then begins. Useful the first time
+  you wire up a new agent and want to verify the protocol works.
+
+Stages 2+ receive their next prompt in the `/stage-complete` response body.
 
 ---
 
