@@ -137,21 +137,26 @@ output tokens a default agent would emit.
 
 ### Pipeline length and the right interface mode
 
-Webhook mode is a 5–8 stage tool. After ~9 stages, output budget,
-context drift, and the agent's "milestone offramp" instinct compound
-and the chain breaks regardless of how strict the directive is. Plan
-accordingly:
+Webhook mode without auto-paste is a 5–8 stage tool. After ~9 stages,
+output budget, context drift, and the agent's "milestone offramp"
+instinct compound and the chain breaks regardless of how strict the
+directive is. Pick the right mode:
 
 | Stages | Recommended mode |
 |---|---|
 | ≤ 8  | Webhook (default) — fine end-to-end |
-| 9–20 | **API mode** (`--interface api`, requires `ANTHROPIC_API_KEY`) — binary drives, no UI agent involved, no context drift |
-| > 20 | Split into sequential mini-pipelines (run after one finishes) |
+| 9+ on Claude desktop / Claude Code GUI | **Webhook + `--auto-paste`** (macOS) — binary drives the chat by simulating clipboard paste + send into the app on every stage. The next stage arrives as a fresh user message, eliminating the "milestone offramp" |
+| 9+ headless | **API mode** (`--interface api`, requires `ANTHROPIC_API_KEY`) — binary calls the API directly, no UI agent involved |
+| > 30 | Split into sequential mini-pipelines |
 
-Tell the user which mode is recommended for their pipeline length when
-you show the Step 4 summary. If they don't have an API key and are
-attempting >8 stages, warn them explicitly that webhook may stall
-mid-run.
+`--auto-paste` requires macOS and a one-time grant of Accessibility
+permission for the terminal that launches the binary (System Settings →
+Privacy & Security → Accessibility). On first failure the binary
+prints a hint pointing there.
+
+Tell the user which mode is recommended for their pipeline length in
+the Step 4 confirmation summary. For >8 stages on the Claude desktop
+app specifically, recommend `--auto-paste`.
 
 ### Stage organisation
 

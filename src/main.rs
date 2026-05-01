@@ -67,6 +67,17 @@ struct Cli {
     #[arg(long)]
     branch: Option<String>,
 
+    /// After each /stage-complete, auto-paste the next prompt into the target
+    /// GUI app (default: Claude desktop) using clipboard + AppleScript. macOS
+    /// only. Reliably drives long webhook pipelines without relying on the
+    /// agent voluntarily self-chaining.
+    #[arg(long, default_value_t = false)]
+    auto_paste: bool,
+
+    /// App name to activate for --auto-paste (default "Claude").
+    #[arg(long)]
+    target_app: Option<String>,
+
     /// Verbose logging.
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
@@ -140,6 +151,17 @@ async fn main() -> Result<()> {
     // CLI --branch overrides whatever the pipeline.json declared.
     if let Some(b) = cli.branch {
         config.branch = Some(b);
+    }
+
+    // CLI auto-paste flags.
+    if cli.auto_paste {
+        config.auto_paste = true;
+    }
+    if let Some(app) = cli.target_app {
+        config.target_app = Some(app);
+    }
+    if config.auto_paste && !cfg!(target_os = "macos") {
+        anyhow::bail!("--auto-paste is currently macOS-only");
     }
 
     // Branch check — refuse to start if the repo isn't on the expected branch.
@@ -240,7 +262,11 @@ async fn run_webhook(config: PipelineConfig, state: RunState, port: u16) -> Resu
     );
 
     println!("{}", "━".repeat(70));
-    if config.bootstrap_check {
+    if config.auto_paste {
+        let app = config.target_app.as_deref()
+            .unwrap_or(injector::accessibility::DEFAULT_TARGET_APP);
+        println!("  AUTO-PASTE MODE — pasting into '{}' on every stage", app);
+    } else if config.bootstrap_check {
         println!("  PASTE THIS INTO YOUR AI AGENT TO BEGIN  (bootstrap-check ON)");
     } else {
         println!("  PASTE THIS INTO YOUR AI AGENT TO BEGIN  (auto-start, no /ready handshake)");
@@ -258,6 +284,26 @@ async fn run_webhook(config: PipelineConfig, state: RunState, port: u16) -> Resu
     println!("  Summary:   ./autopilot-summary.md (written as stages complete)");
     println!("{}", "━".repeat(70));
     println!();
+
+    // Auto-paste stage 1 kickoff into the target app — user gives focus to
+    // it within ~1.5s. Skipped when bootstrap_check is on (legacy mode keeps
+    // the manual paste flow).
+    if config.auto_paste && !config.bootstrap_check {
+        let app = config.target_app.clone()
+            .unwrap_or_else(|| injector::accessibility::DEFAULT_TARGET_APP.to_string());
+        let bootstrap_clone = bootstrap.clone();
+        tokio::task::spawn_blocking(move || {
+            // Small delay so the user can see the printed kickoff in the
+            // terminal before focus jumps to the GUI app.
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            if let Err(e) = injector::accessibility::auto_paste(&bootstrap_clone, &app) {
+                tracing::error!("Stage 1 auto-paste failed: {}", e);
+                tracing::error!("Falling back to manual paste — copy the kickoff prompt above into your AI agent.");
+            } else {
+                tracing::info!("Stage 1 kickoff auto-pasted into '{}'", app);
+            }
+        });
+    }
 
     // Block until all stages complete (server signals via done_rx).
     done_rx.await.ok();
