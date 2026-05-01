@@ -162,6 +162,7 @@ async fn ready(
             &stage.prompt,
             &completed,
             stage.model.as_deref(),
+            stage.skip_progress,
         );
         (prompt, stage.id.clone(), format!("{}", stage.phase), stage.summary.clone())
     };
@@ -219,9 +220,14 @@ async fn stage_complete(
     inner.run_state.stages[current_idx].status = StageStatus::Completed;
     inner.run_state.stages[current_idx].completed_at = Some(unix_now());
     inner.run_state.stages[current_idx].duration_secs = Some(duration_secs);
+    // Truncate verbose summaries, and dedup against the stage's pre-written
+    // summary — if the AI just echoed our own one-liner, store None and
+    // fall back to the config summary in the progress block.
+    let stage_pre_summary = inner.config.stages[current_idx].summary.clone();
     inner.run_state.stages[current_idx].ai_summary = req.summary.clone()
         .filter(|s| !s.trim().is_empty())
-        .map(|s| truncate_summary(&s));
+        .map(|s| truncate_summary(&s))
+        .filter(|s| !is_near_duplicate(s, &stage_pre_summary));
     inner.run_state.current_stage = current_idx + 1;
     inner.last_activity = now;
     inner.stage_started_at = now;
@@ -269,6 +275,7 @@ async fn stage_complete(
         &next.prompt,
         &completed,
         next.model.as_deref(),
+        next.skip_progress,
     );
 
     tracing::info!("Serving stage {}/{}: '{}'", next_idx + 1, total, next.id);
@@ -476,6 +483,19 @@ fn truncate_summary(s: &str) -> String {
     out
 }
 
+/// True if the AI-supplied summary is just a re-phrased echo of the stage's
+/// pre-written summary. Compared after lowercasing and stripping non-alnum.
+fn is_near_duplicate(a: &str, b: &str) -> bool {
+    let normalize = |s: &str| -> String {
+        s.chars().filter_map(|c| {
+            if c.is_alphanumeric() { Some(c.to_ascii_lowercase()) } else { None }
+        }).collect()
+    };
+    let na = normalize(a);
+    let nb = normalize(b);
+    !na.is_empty() && !nb.is_empty() && (na == nb || na.starts_with(&nb) || nb.starts_with(&na))
+}
+
 /// Build the compact "Progress so far" block from completed stages.
 /// Each entry uses the AI-provided summary if available, falling back to the
 /// config summary. Kept deliberately short to minimise token cost.
@@ -488,13 +508,13 @@ fn build_progress_block(completed: &[(&crate::config::StageState, &crate::config
     let elided = tail_start;
     let lines: Vec<String> = completed
         .iter()
-        .enumerate()
         .skip(tail_start)
-        .map(|(i, (st, cfg))| {
+        .map(|(st, cfg)| {
             let summary = st.ai_summary.as_deref()
                 .filter(|s| !s.trim().is_empty())
                 .unwrap_or(&cfg.summary);
-            format!("{}. [{}] {}", i + 1, cfg.id, summary)
+            // Compact format — drop bracket noise, save ~5 chars/line × N stages.
+            format!("- {}: {}", cfg.id, summary)
         })
         .collect();
 
@@ -506,16 +526,37 @@ fn build_progress_block(completed: &[(&crate::config::StageState, &crate::config
     Some(format!("{}{}\n\n---\n\n", header, lines.join("\n")))
 }
 
+/// Resend the full global_rules block every Nth stage (in webhook mode the
+/// AI is in one chat session — repeating rules every stage wastes tokens, but
+/// dropping them entirely risks drift if the chat context gets pruned).
+/// Pattern: include on stages where index % 3 == 0 (i.e. 1, 4, 7, ...).
+const RULES_RESEND_EVERY: usize = 3;
+
 pub fn assemble_prompt(
     global_rules: &[String],
     stage_prompt: &str,
     completed: &[(&crate::config::StageState, &crate::config::Stage)],
     stage_model: Option<&str>,
+    skip_progress: bool,
 ) -> String {
-    let progress = build_progress_block(completed).unwrap_or_default();
-
-    let rules_block = if global_rules.is_empty() {
+    let progress = if skip_progress {
         String::new()
+    } else {
+        build_progress_block(completed).unwrap_or_default()
+    };
+
+    // Stage index (0-based): completed.len() == number of stages already done.
+    let stage_index = completed.len();
+    let resend_rules = stage_index % RULES_RESEND_EVERY == 0;
+
+    let rules_block = if global_rules.is_empty() || !resend_rules {
+        // Skip the full rules block on intermediate stages — cheap reminder
+        // instead, just enough to anchor the AI if context was pruned.
+        if global_rules.is_empty() || stage_index == 0 {
+            String::new()
+        } else {
+            "*Continue applying the project rules from earlier in this conversation.*\n\n---\n\n".to_string()
+        }
     } else {
         let rules = global_rules.iter()
             .enumerate()

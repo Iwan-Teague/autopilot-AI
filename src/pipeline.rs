@@ -72,7 +72,7 @@ impl Pipeline {
                 .iter()
                 .zip(self.config.stages[..idx].iter())
                 .collect();
-            let (system, user) = self.assemble_prompt(&stage.prompt, &completed);
+            let (system, user) = self.assemble_prompt(&stage.prompt, &completed, stage.skip_progress);
 
             // Inject — pass per-stage model override when set.
             self.injector.inject(system.as_deref(), &user, stage.model.as_deref()).await
@@ -116,6 +116,7 @@ impl Pipeline {
         &self,
         stage_prompt: &str,
         completed: &[(&crate::config::StageState, &crate::config::Stage)],
+        skip_progress: bool,
     ) -> (Option<String>, String) {
         // System half — global rules only. Stable across the whole pipeline.
         let system = if self.config.global_rules.is_empty() {
@@ -132,20 +133,19 @@ impl Pipeline {
 
         // User half — rolling progress (capped) + this stage's prompt.
         const TAIL: usize = 5;
-        let progress_block = if completed.is_empty() {
+        let progress_block = if skip_progress || completed.is_empty() {
             String::new()
         } else {
             let total = completed.len();
             let tail_start = total.saturating_sub(TAIL);
             let lines: Vec<String> = completed
                 .iter()
-                .enumerate()
                 .skip(tail_start)
-                .map(|(i, (st, cfg))| {
+                .map(|(st, cfg)| {
                     let summary = st.ai_summary.as_deref()
                         .filter(|s| !s.trim().is_empty())
                         .unwrap_or(&cfg.summary);
-                    format!("{}. [{}] {}", i + 1, cfg.id, summary)
+                    format!("- {}: {}", cfg.id, summary)
                 })
                 .collect();
             let header = if tail_start > 0 {

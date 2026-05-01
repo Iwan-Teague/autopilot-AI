@@ -60,6 +60,22 @@ Ask for the project spec file if not provided. Once you have it:
   section, infer 3–6 rules from the document's goals and constraints.
 - Identify **all project sections** — features, modules, or components to build.
 
+### Always-on output rules
+
+Append these two rules to `global_rules` on every pipeline (cuts ~30%
+of output tokens by suppressing model preamble/recap):
+
+1. *"Be terse. Output code, diffs, file edits, or shell commands only — no
+   preamble, no recap, no narration. The required `curl /stage-complete`
+   call at the end of each stage (with a one-sentence factual summary) is
+   the only exception — always include it."*
+2. *"For modifications under ~50 lines, output a unified diff or use targeted
+   edits — do not paste full file contents. Full files are fine for new
+   files or large rewrites."*
+
+These ship in the cacheable `system` block, so on Anthropic API mode they
+cost almost nothing after stage 1.
+
 ---
 
 ## Step 2 — Generate the prompt pipeline
@@ -105,6 +121,18 @@ Every prompt must include:
 
 Global rules are prepended automatically by the binary — do not repeat them
 in individual stage prompts.
+
+### Small-edit stages — request diff output explicitly
+
+If the stage prompt describes a *modification* rather than greenfield code
+(keywords: `fix`, `tweak`, `adjust`, `rename`, `update`, `add to`, `replace`,
+`refactor`, `inline`, `extract`), append this line to the `## Objective`:
+
+> *Output a unified diff or targeted file edits only — do not paste full
+> file contents.*
+
+Skip this for stages that create new files or large modules — full-file
+output is fine there.
 
 ### Completion marker
 

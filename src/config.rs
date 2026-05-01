@@ -76,6 +76,12 @@ pub struct Stage {
     /// stages (large refactors) where 30 min isn't enough.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
+
+    /// If true, the rolling "Progress so far" block is omitted from this
+    /// stage's prompt. Use for stages that don't depend on prior work
+    /// (independent feature implementations, parallel modules). Default false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub skip_progress: bool,
 }
 
 // ---------------------------------------------------------------------------
