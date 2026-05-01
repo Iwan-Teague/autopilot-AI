@@ -114,8 +114,9 @@ impl PromptInjector for ApiInjector {
         let completion_tx = crate::monitor::api_stream::arm().await;
 
         let model = model_override.unwrap_or(&self.provider.model);
-        if model_override.is_some() {
-            tracing::info!("Stage model override: {}", model);
+        match model_override {
+            Some(_) => tracing::info!("Stage model: {} (per-stage override)", model),
+            None    => tracing::info!("Stage model: {}", model),
         }
 
         let response = match self.provider.format {

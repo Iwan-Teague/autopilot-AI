@@ -48,10 +48,10 @@ impl PromptInjector for SubprocessInjector {
 
         // Both `claude` and `codex` accept `--model X` for model selection.
         if let Some(model) = model_override {
-            tracing::info!("Spawning: {} --model {} -p <prompt>", self.bin, model);
+            tracing::info!("Stage model: {} (per-stage override) — spawning: {} --model {} -p <prompt>", model, self.bin, model);
             cmd.arg("--model").arg(model);
         } else {
-            tracing::info!("Spawning: {} -p <prompt>", self.bin);
+            tracing::info!("Stage model: <CLI default> — spawning: {} -p <prompt>", self.bin);
         }
 
         let child = cmd

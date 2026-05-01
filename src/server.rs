@@ -151,7 +151,7 @@ async fn ready(
     }
 
     // Use a block so all borrows of `inner` are released before the mutable assignments below.
-    let (prompt, stage_id, stage_phase, stage_summary) = {
+    let (prompt, stage_id, stage_phase, stage_summary, stage_model) = {
         let stage = &inner.config.stages[current];
         let completed: Vec<_> = inner.run_state.stages[..current]
             .iter()
@@ -164,13 +164,22 @@ async fn ready(
             stage.model.as_deref(),
             stage.skip_progress,
         );
-        (prompt, stage.id.clone(), format!("{}", stage.phase), stage.summary.clone())
+        (
+            prompt,
+            stage.id.clone(),
+            format!("{}", stage.phase),
+            stage.summary.clone(),
+            stage.model.clone(),
+        )
     };
 
     inner.last_activity = Instant::now();
     inner.stage_started_at = Instant::now();
 
-    tracing::info!("Health check OK — serving stage 1/{}: '{}'", total, stage_id);
+    match &stage_model {
+        Some(m) => tracing::info!("Health check OK — serving stage 1/{}: '{}' (model: {})", total, stage_id, m),
+        None    => tracing::info!("Health check OK — serving stage 1/{}: '{}'", total, stage_id),
+    }
 
     (
         StatusCode::OK,
@@ -247,6 +256,7 @@ async fn stage_complete(
         &stage_cfg.summary,
         req.summary.as_deref(),
         duration_secs,
+        stage_cfg.model.as_deref(),
     );
 
     tracing::info!(
@@ -278,7 +288,10 @@ async fn stage_complete(
         next.skip_progress,
     );
 
-    tracing::info!("Serving stage {}/{}: '{}'", next_idx + 1, total, next.id);
+    match &next.model {
+        Some(m) => tracing::info!("Serving stage {}/{}: '{}' (model: {})", next_idx + 1, total, next.id, m),
+        None    => tracing::info!("Serving stage {}/{}: '{}'", next_idx + 1, total, next.id),
+    }
 
     (StatusCode::OK, Json(StageCompleteResponse::Continue {
         completed: req.stage_id,
@@ -416,6 +429,7 @@ fn append_summary(
     config_summary: &str,
     ai_summary: Option<&str>,
     duration_secs: u64,
+    model: Option<&str>,
 ) {
     let mins = duration_secs / 60;
     let secs = duration_secs % 60;
@@ -430,10 +444,15 @@ fn append_summary(
         _ => String::new(),
     };
 
+    let model_str = match model {
+        Some(m) => format!(" · `{}`", m),
+        None    => String::new(),
+    };
+
     let entry = format!(
-        "## Stage {}/{}: {} ({})\n*{} · {}*{}\n\n---\n\n",
+        "## Stage {}/{}: {} ({})\n*{} · {}{}*{}\n\n---\n\n",
         stage_num, total, id, phase,
-        config_summary, duration_str,
+        config_summary, duration_str, model_str,
         ai_line
     );
 
