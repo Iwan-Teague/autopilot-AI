@@ -118,6 +118,15 @@ output tokens a default agent would emit.
    trailing summary. The required `curl /stage-complete` call at the end
    of each stage is the only exception. Its `summary` field is one
    factual sentence (normal English), nothing else."*
+
+   *"NEVER write a 'Summary of accomplishments', 'Progress so far',
+   'Phase X complete' or any milestone-style block. The autopilot
+   server tracks stages — you do not. After each `curl /stage-complete`
+   either (a) the response is `continue` and you start the next task
+   silently, or (b) the response is `complete` and you write one
+   sentence to the user saying the pipeline finished. No status report,
+   no offramp, no 'ready for Phase N or completion' phrasing — those
+   words trick agents into stopping mid-pipeline."*
 3. *"For modifications under ~50 lines, output a unified diff or use
    targeted edits — never paste full file contents. Full files are only
    for new files or large rewrites."*
@@ -125,6 +134,26 @@ output tokens a default agent would emit.
 ---
 
 ## Step 2 — Generate the prompt pipeline
+
+### Pipeline length and the right interface mode
+
+Webhook mode is a 5–8 stage tool. After ~9 stages, output budget,
+context drift, and the agent's "milestone offramp" instinct compound
+and the chain breaks regardless of how strict the directive is. Plan
+accordingly:
+
+| Stages | Recommended mode |
+|---|---|
+| ≤ 8  | Webhook (default) — fine end-to-end |
+| 9–20 | **API mode** (`--interface api`, requires `ANTHROPIC_API_KEY`) — binary drives, no UI agent involved, no context drift |
+| > 20 | Split into sequential mini-pipelines (run after one finishes) |
+
+Tell the user which mode is recommended for their pipeline length when
+you show the Step 4 summary. If they don't have an API key and are
+attempting >8 stages, warn them explicitly that webhook may stall
+mid-run.
+
+### Stage organisation
 
 Organise stages into exactly three phases in order:
 
