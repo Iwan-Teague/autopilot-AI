@@ -52,6 +52,13 @@ pub struct PipelineConfig {
     #[serde(default)]
     pub bootstrap_check: bool,
 
+    /// Optional git branch this pipeline expects to run on. When set and the
+    /// repo's current branch doesn't match, the binary refuses to start with
+    /// a helpful error. Omit (or null) to skip the check and just operate on
+    /// whatever branch is currently checked out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+
     /// Where runtime state is persisted for resume support.
     #[serde(default = "default_state_path")]
     pub state_path: PathBuf,

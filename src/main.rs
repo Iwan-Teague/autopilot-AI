@@ -9,6 +9,7 @@
 ///   autopilot --pipeline pipeline.json --port 7432           # custom webhook port
 
 mod config;
+mod git;
 mod provider;
 mod monitor;
 mod injector;
@@ -58,6 +59,13 @@ struct Cli {
     /// — the kickoff prompt is stage 1 directly, saving a round trip.
     #[arg(long, default_value_t = false)]
     bootstrap_check: bool,
+
+    /// Require the repo to be on this branch before running. Overrides any
+    /// `branch` field in pipeline.json. If the current branch differs, the
+    /// binary refuses to start so you don't accidentally run on the wrong
+    /// branch. Omit to operate on whatever branch is currently checked out.
+    #[arg(long)]
+    branch: Option<String>,
 
     /// Verbose logging.
     #[arg(short, long, default_value_t = false)]
@@ -127,6 +135,39 @@ async fn main() -> Result<()> {
     // CLI flag turns the bootstrap handshake on for this run.
     if cli.bootstrap_check {
         config.bootstrap_check = true;
+    }
+
+    // CLI --branch overrides whatever the pipeline.json declared.
+    if let Some(b) = cli.branch {
+        config.branch = Some(b);
+    }
+
+    // Branch check — refuse to start if the repo isn't on the expected branch.
+    // Skip silently when not in a git repo (someone running outside one).
+    if git::in_repo() {
+        let current = git::current_branch();
+        match (&config.branch, &current) {
+            (Some(want), Some(have)) if want != have => {
+                anyhow::bail!(
+                    "Pipeline expects branch '{}' but repo is on '{}'.\n\
+                     Switch with: git checkout {}\n\
+                     Or remove the branch pin from pipeline.json / drop --branch.",
+                    want, have, want
+                );
+            }
+            (Some(want), None) => {
+                tracing::warn!(
+                    "Pipeline expects branch '{}' but git HEAD is detached. Continuing.",
+                    want
+                );
+            }
+            _ => {}
+        }
+        if let Some(b) = &current {
+            tracing::info!("Branch: {}", b);
+        }
+    } else if config.branch.is_some() {
+        tracing::warn!("Pipeline declares a branch but cwd is not a git repo. Skipping check.");
     }
 
     // Auto-detection: webhook is now the preferred mode for desktop use.
@@ -258,6 +299,12 @@ fn print_summary(config: &PipelineConfig) {
     println!("  Interface: {}", config.interface.label());
     if !config.global_rules.is_empty() {
         println!("  Rules:     {} rule(s) prepended to every prompt", config.global_rules.len());
+    }
+    if let Some(branch) = git::current_branch() {
+        let pinned = config.branch.as_deref()
+            .map(|b| if b == branch { " (pinned)" } else { " (mismatch)" })
+            .unwrap_or("");
+        println!("  Branch:    {}{}", branch, pinned);
     }
     println!();
 

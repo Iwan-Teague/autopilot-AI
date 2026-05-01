@@ -50,6 +50,39 @@ Auto-detection tries webhook → API → CLI in that order.
 
 ---
 
+## Step 0 — Confirm working branch
+
+Detect the repo's current branch:
+
+```bash
+git rev-parse --abbrev-ref HEAD 2>/dev/null
+```
+
+**Default behaviour:** the pipeline runs on whatever branch is currently
+checked out — no need to ask the user explicitly. Just mention it in the
+Step 4 confirmation summary so they can spot a wrong branch before
+kickoff.
+
+**If the user explicitly named a different branch** (e.g. "run autopilot
+on `feature/foo`"):
+
+1. Check whether the branch exists:
+   ```bash
+   git rev-parse --verify feature/foo 2>/dev/null
+   ```
+2. If it exists, ask the user: *"Switch to `feature/foo` now? (`git
+   checkout feature/foo`)"* — wait for confirmation, then run the
+   checkout. Do not switch silently — there may be uncommitted work.
+3. If it doesn't exist, ask: *"`feature/foo` doesn't exist. Create it
+   from current HEAD? (`git checkout -b feature/foo`)"*
+4. Once on the requested branch, write `"branch": "feature/foo"` into
+   pipeline.json so the binary refuses to start if the user later tries
+   to run it from a different branch.
+
+If the cwd is not a git repo, skip this step.
+
+---
+
 ## Step 1 — Read and understand the spec document
 
 Ask for the project spec file if not provided. Once you have it:
@@ -239,6 +272,7 @@ Present the full pipeline before writing any files:
    N. [test-suite]        <summary>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Stages: <N>  |  Interface: webhook (auto)
+  Branch: <current branch>  (pinned: <yes/no>)
   Model tiering: <enabled — show per-stage model> | disabled
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

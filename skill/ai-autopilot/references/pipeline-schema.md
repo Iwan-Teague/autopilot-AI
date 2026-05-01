@@ -21,6 +21,12 @@ Useful for verifying a new agent works end-to-end. When `false`, the
 kickoff prompt IS stage 1 directly — saves a round trip and the tokens
 spent on the ceremony.
 
+`branch` (optional) — pin the pipeline to a specific git branch. The
+binary refuses to start if the repo's current branch doesn't match.
+Override at runtime with `--branch X`. Omit (or null) to operate on
+whatever branch is currently checked out. The kickoff summary always
+shows the active branch regardless of whether it's pinned.
+
 ## Stage object
 
 ```json
