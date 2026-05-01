@@ -73,8 +73,8 @@ impl Pipeline {
                 .collect();
             let prompt = self.assemble_prompt(&stage.prompt, &completed);
 
-            // Inject
-            self.injector.inject(&prompt).await
+            // Inject — pass per-stage model override when set.
+            self.injector.inject(&prompt, stage.model.as_deref()).await
                 .with_context(|| format!("Injecting stage '{}'", stage.id))?;
 
             // Wait for completion

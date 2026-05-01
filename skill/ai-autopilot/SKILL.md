@@ -133,6 +133,47 @@ of the prompt text returned in the server response.
 
 ---
 
+## Step 3.5 — Per-stage model tiering (optional, opt-in)
+
+After generating stages, ask the user:
+
+> "Enable per-stage model tiering? Cheap models run scaffolding + tests;
+> smart models run implementation. Saves cost on long pipelines. [y/N]"
+
+**Default no.** If the user says no (or doesn't answer), skip this step
+entirely — every stage runs on whatever single model is configured.
+
+If the user says yes:
+
+1. Run the detector:
+   ```bash
+   python3 /path/to/skill/ai-autopilot/scripts/detect_models.py
+   ```
+   It emits JSON: `[{provider, model, tier, source}, ...]`.
+2. If the output is empty, tell the user no models were detected and fall
+   back to no tiering (don't fail the pipeline).
+3. Otherwise pick one model per tier:
+   - `light` → first entry with `tier == "light"`
+   - `mid`   → first with `tier == "mid"` (fallback to `heavy`)
+   - `heavy` → first with `tier == "heavy"` (fallback to `mid`)
+4. Assign each stage a tier:
+   - Foundation → `light` by default
+   - Implementation → `heavy` by default
+   - Testing → `light` by default
+   - Bump **up** if prompt contains: `architecture`, `complex`, `refactor`,
+     `migrate`, `algorithm`, `state machine`, `parser`, `compiler`.
+   - Bump **down** if prompt contains: `lint`, `format`, `rename`,
+     `docstring`, `README`, `cleanup`.
+5. Write `stage.model = <model id for that tier>` into each stage in
+   pipeline.json.
+
+Show the user the model assignment in the Step 4 confirmation summary so
+they can override before kickoff.
+
+See `references/model-tiers.md` for the full tier table and rationale.
+
+---
+
 ## Step 4 — Show summary and get confirmation
 
 Present the full pipeline before writing any files:
@@ -156,6 +197,7 @@ Present the full pipeline before writing any files:
    N. [test-suite]        <summary>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Stages: <N>  |  Interface: webhook (auto)
+  Model tiering: <enabled — show per-stage model> | disabled
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Does this look right? Any stages to add, remove, or rename?
@@ -281,4 +323,6 @@ Or via environment:
 
 - `references/pipeline-schema.md` — full JSON schema with examples
 - `references/example-spec.md` — example project spec to try
+- `references/model-tiers.md` — opt-in per-stage model switching
+- `scripts/detect_models.py` — probe local env for available AI models
 - Rust source: `/Users/iwan/Desktop/autopilot-ai/src/`

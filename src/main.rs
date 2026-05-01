@@ -49,6 +49,11 @@ struct Cli {
     #[arg(long, default_value_t = false)]
     resume: bool,
 
+    /// Override the model for the entire run (e.g. claude-haiku-4-5, gpt-4o-mini).
+    /// Per-stage `model` fields in pipeline.json still win over this.
+    #[arg(long)]
+    model: Option<String>,
+
     /// Verbose logging.
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
@@ -105,6 +110,13 @@ async fn main() -> Result<()> {
     // CLI interface override.
     if let Some(iface) = cli.interface {
         config.interface = iface.into();
+    }
+
+    // CLI model override applies to the whole pipeline, but per-stage
+    // `model` fields in pipeline.json take precedence.
+    if let Some(model) = cli.model {
+        tracing::info!("Pipeline-level model override from --model: {}", model);
+        config.model = Some(model);
     }
 
     // Auto-detection: webhook is now the preferred mode for desktop use.

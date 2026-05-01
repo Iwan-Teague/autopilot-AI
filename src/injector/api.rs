@@ -31,14 +31,19 @@ impl ApiInjector {
 
 #[async_trait]
 impl PromptInjector for ApiInjector {
-    async fn inject(&mut self, prompt: &str) -> Result<()> {
+    async fn inject(&mut self, prompt: &str, model_override: Option<&str>) -> Result<()> {
         // Each stage is a fresh conversation — no history carried over.
         // This mirrors how a real human would open a new chat for each task.
         let completion_tx = crate::monitor::api_stream::arm().await;
 
+        let model = model_override.unwrap_or(&self.provider.model);
+        if model_override.is_some() {
+            tracing::info!("Stage model override: {}", model);
+        }
+
         let response = match self.provider.format {
-            ApiFormat::Anthropic => self.send_anthropic(prompt).await?,
-            ApiFormat::OpenAi    => self.send_openai(prompt).await?,
+            ApiFormat::Anthropic => self.send_anthropic(prompt, model).await?,
+            ApiFormat::OpenAi    => self.send_openai(prompt, model).await?,
         };
 
         let mut stream = response.bytes_stream();
@@ -70,12 +75,12 @@ impl PromptInjector for ApiInjector {
 // ---------------------------------------------------------------------------
 
 impl ApiInjector {
-    async fn send_anthropic(&self, prompt: &str) -> Result<reqwest::Response> {
+    async fn send_anthropic(&self, prompt: &str, model: &str) -> Result<reqwest::Response> {
         let url = format!("{}/v1/messages", self.provider.base_url.trim_end_matches('/'));
         let key = self.provider.api_key.as_deref().unwrap_or("");
 
         let body = json!({
-            "model": self.provider.model,
+            "model": model,
             "max_tokens": 8192,
             "stream": true,
             "messages": [{ "role": "user", "content": prompt }],
@@ -94,7 +99,7 @@ impl ApiInjector {
         check_status(resp).await
     }
 
-    async fn send_openai(&self, prompt: &str) -> Result<reqwest::Response> {
+    async fn send_openai(&self, prompt: &str, model: &str) -> Result<reqwest::Response> {
         let url = format!("{}/v1/chat/completions", self.provider.base_url.trim_end_matches('/'));
 
         let mut req = self.client
@@ -109,7 +114,7 @@ impl ApiInjector {
         }
 
         let body = json!({
-            "model": self.provider.model,
+            "model": model,
             "stream": true,
             "messages": [{ "role": "user", "content": prompt }],
         });

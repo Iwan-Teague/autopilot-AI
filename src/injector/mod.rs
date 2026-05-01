@@ -24,7 +24,9 @@ use crate::provider;
 
 #[async_trait]
 pub trait PromptInjector: Send + Sync {
-    async fn inject(&mut self, prompt: &str) -> Result<()>;
+    /// Inject a prompt. `model_override` (when Some) takes precedence over
+    /// the injector's default model — used for per-stage model switching.
+    async fn inject(&mut self, prompt: &str, model_override: Option<&str>) -> Result<()>;
     fn name(&self) -> &'static str;
 }
 

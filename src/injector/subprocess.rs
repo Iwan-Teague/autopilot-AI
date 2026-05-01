@@ -31,12 +31,19 @@ impl SubprocessInjector {
 
 #[async_trait]
 impl PromptInjector for SubprocessInjector {
-    async fn inject(&mut self, prompt: &str) -> Result<()> {
-        tracing::info!("Spawning: {} -p <prompt>", self.bin);
+    async fn inject(&mut self, prompt: &str, model_override: Option<&str>) -> Result<()> {
+        let mut cmd = Command::new(&self.bin);
+        cmd.arg("-p").arg(prompt);
 
-        let child = Command::new(&self.bin)
-            .arg("-p")
-            .arg(prompt)
+        // Both `claude` and `codex` accept `--model X` for model selection.
+        if let Some(model) = model_override {
+            tracing::info!("Spawning: {} --model {} -p <prompt>", self.bin, model);
+            cmd.arg("--model").arg(model);
+        } else {
+            tracing::info!("Spawning: {} -p <prompt>", self.bin);
+        }
+
+        let child = cmd
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .spawn()

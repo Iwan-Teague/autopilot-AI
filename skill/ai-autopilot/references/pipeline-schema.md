@@ -21,9 +21,18 @@ The `pipeline.json` file is the contract between the skill and the Rust binary.
   "id": "kebab-case-identifier",
   "phase": "foundation | implementation | testing",
   "summary": "One-line description shown in the progress header",
-  "prompt": "Full prompt text — global_rules are prepended by the binary"
+  "prompt": "Full prompt text — global_rules are prepended by the binary",
+  "model": "optional — per-stage model override (e.g. claude-haiku-4-5)"
 }
 ```
+
+The `model` field is optional. When set:
+- **API/CLI mode**: the binary uses this model for the stage, overriding the
+  pipeline-level `model` and any auto-detected default.
+- **Webhook mode**: the binary prepends a "Recommended model" hint to the
+  prompt. The user/agent must honor it via `/model` (advisory only).
+
+See `model-tiers.md` for the opt-in tiering workflow that populates this field.
 
 ## Phase values
 

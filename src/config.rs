@@ -64,6 +64,11 @@ pub struct Stage {
     pub summary: String,
     /// Full prompt text. Global rules are prepended by the server.
     pub prompt: String,
+    /// Optional per-stage model override. When set, API/CLI modes use this
+    /// model for this stage; webhook mode prepends a "Suggested model" hint
+    /// to the prompt so the AI can switch via /model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

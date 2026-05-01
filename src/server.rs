@@ -157,7 +157,12 @@ async fn ready(
             .iter()
             .zip(inner.config.stages[..current].iter())
             .collect();
-        let prompt = assemble_prompt(&inner.config.global_rules, &stage.prompt, &completed);
+        let prompt = assemble_prompt(
+            &inner.config.global_rules,
+            &stage.prompt,
+            &completed,
+            stage.model.as_deref(),
+        );
         (prompt, stage.id.clone(), format!("{}", stage.phase), stage.summary.clone())
     };
 
@@ -258,7 +263,12 @@ async fn stage_complete(
         .iter()
         .zip(inner.config.stages[..next_idx].iter())
         .collect();
-    let prompt = assemble_prompt(&inner.config.global_rules, &next.prompt, &completed);
+    let prompt = assemble_prompt(
+        &inner.config.global_rules,
+        &next.prompt,
+        &completed,
+        next.model.as_deref(),
+    );
 
     tracing::info!("Serving stage {}/{}: '{}'", next_idx + 1, total, next.id);
 
@@ -467,6 +477,7 @@ pub fn assemble_prompt(
     global_rules: &[String],
     stage_prompt: &str,
     completed: &[(&crate::config::StageState, &crate::config::Stage)],
+    stage_model: Option<&str>,
 ) -> String {
     let progress = build_progress_block(completed).unwrap_or_default();
 
@@ -481,7 +492,18 @@ pub fn assemble_prompt(
         format!("## Project Rules\n{}\n\n---\n\n", rules)
     };
 
-    format!("{}{}{}", rules_block, progress, stage_prompt)
+    // Webhook mode can't force a model switch — the AI is whatever the user
+    // pasted into. We surface the recommendation as a hint at the top so the
+    // user (or an agent that supports it) can switch via /model.
+    let model_hint = stage_model
+        .map(|m| format!(
+            "## Recommended model for this stage\n\
+             `{m}` — switch with `/model {m}` if your agent supports it. \
+             This stage was tagged for that model based on its complexity tier.\n\n---\n\n"
+        ))
+        .unwrap_or_default();
+
+    format!("{}{}{}{}", rules_block, model_hint, progress, stage_prompt)
 }
 
 pub fn build_bootstrap_prompt(server_addr: &str, port: u16, pipeline_name: &str) -> String {
