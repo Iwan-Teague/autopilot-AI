@@ -31,9 +31,20 @@ impl SubprocessInjector {
 
 #[async_trait]
 impl PromptInjector for SubprocessInjector {
-    async fn inject(&mut self, prompt: &str, model_override: Option<&str>) -> Result<()> {
+    async fn inject(
+        &mut self,
+        system: Option<&str>,
+        user: &str,
+        model_override: Option<&str>,
+    ) -> Result<()> {
+        // CLIs (claude, codex) don't have a separate system arg, so concat.
+        let prompt = match system {
+            Some(sys) => format!("{}\n\n---\n\n{}", sys, user),
+            None      => user.to_string(),
+        };
+
         let mut cmd = Command::new(&self.bin);
-        cmd.arg("-p").arg(prompt);
+        cmd.arg("-p").arg(&prompt);
 
         // Both `claude` and `codex` accept `--model X` for model selection.
         if let Some(model) = model_override {

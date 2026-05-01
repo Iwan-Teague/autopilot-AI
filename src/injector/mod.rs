@@ -24,9 +24,17 @@ use crate::provider;
 
 #[async_trait]
 pub trait PromptInjector: Send + Sync {
-    /// Inject a prompt. `model_override` (when Some) takes precedence over
-    /// the injector's default model — used for per-stage model switching.
-    async fn inject(&mut self, prompt: &str, model_override: Option<&str>) -> Result<()>;
+    /// Inject a stage. `system` is the cacheable, stable part (global rules)
+    /// — Anthropic API mode marks it with `cache_control: ephemeral` for a
+    /// 90% discount on every stage after the first. `user` is the per-stage
+    /// content (progress + stage prompt). `model_override` (when Some) takes
+    /// precedence over the injector's default model.
+    async fn inject(
+        &mut self,
+        system: Option<&str>,
+        user: &str,
+        model_override: Option<&str>,
+    ) -> Result<()>;
     fn name(&self) -> &'static str;
 }
 

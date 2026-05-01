@@ -220,7 +220,8 @@ async fn stage_complete(
     inner.run_state.stages[current_idx].completed_at = Some(unix_now());
     inner.run_state.stages[current_idx].duration_secs = Some(duration_secs);
     inner.run_state.stages[current_idx].ai_summary = req.summary.clone()
-        .filter(|s| !s.trim().is_empty());
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| truncate_summary(&s));
     inner.run_state.current_stage = current_idx + 1;
     inner.last_activity = now;
     inner.stage_started_at = now;
@@ -354,10 +355,11 @@ pub async fn start(
 // Watchdog
 // ---------------------------------------------------------------------------
 
-fn spawn_watchdog(state: ServerState, timeout_secs: u64) {
+fn spawn_watchdog(state: ServerState, default_timeout_secs: u64) {
     tokio::spawn(async move {
-        let poll_interval = Duration::from_secs(60.min(timeout_secs / 2).max(1));
-        let timeout = Duration::from_secs(timeout_secs);
+        // Poll once a minute (or twice per timeout window for very short
+        // stages — picks the shorter of the two).
+        let poll_interval = Duration::from_secs(60.min(default_timeout_secs / 2).max(1));
 
         loop {
             tokio::time::sleep(poll_interval).await;
@@ -369,23 +371,25 @@ fn spawn_watchdog(state: ServerState, timeout_secs: u64) {
                 break;
             }
 
+            // Per-stage override wins over pipeline default.
+            let active_stage = &inner.config.stages[inner.run_state.current_stage];
+            let timeout_secs = active_stage.timeout_secs.unwrap_or(default_timeout_secs);
+            let timeout = Duration::from_secs(timeout_secs);
+
             let since_last = Instant::now().duration_since(inner.last_activity);
 
             if since_last >= timeout {
-                let stage_id = inner.config.stages
-                    .get(inner.run_state.current_stage)
-                    .map(|s| s.id.as_str())
-                    .unwrap_or("unknown");
-
                 tracing::warn!(
-                    "Watchdog: no activity for {}s (stage '{}' may have stalled). \
+                    "Watchdog: no activity for {}s on stage '{}' (timeout {}s — {}). \
                      Still waiting — check your AI agent's chat window.",
                     since_last.as_secs(),
-                    stage_id
+                    active_stage.id,
+                    timeout_secs,
+                    if active_stage.timeout_secs.is_some() { "per-stage" } else { "pipeline default" }
                 );
 
                 // Write a visible warning to the summary file.
-                append_watchdog_warning(stage_id, since_last.as_secs());
+                append_watchdog_warning(&active_stage.id, since_last.as_secs());
             }
         }
     });
@@ -453,6 +457,25 @@ fn append_watchdog_warning(stage_id: &str, elapsed_secs: u64) {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Cap on how many recent stages appear verbatim in the "Progress so far"
+/// block. Older stages collapse into "... and N earlier stages completed."
+/// Keeps token cost flat as pipelines grow.
+const PROGRESS_TAIL: usize = 5;
+
+/// Hard cap on per-stage AI summaries. Models occasionally return paragraph-
+/// long summaries that bloat the progress block on every subsequent stage.
+const SUMMARY_MAX_CHARS: usize = 120;
+
+fn truncate_summary(s: &str) -> String {
+    let trimmed = s.trim();
+    if trimmed.chars().count() <= SUMMARY_MAX_CHARS {
+        return trimmed.to_string();
+    }
+    let mut out: String = trimmed.chars().take(SUMMARY_MAX_CHARS - 1).collect();
+    out.push('…');
+    out
+}
+
 /// Build the compact "Progress so far" block from completed stages.
 /// Each entry uses the AI-provided summary if available, falling back to the
 /// config summary. Kept deliberately short to minimise token cost.
@@ -460,9 +483,13 @@ fn build_progress_block(completed: &[(&crate::config::StageState, &crate::config
     if completed.is_empty() {
         return None;
     }
+    let total = completed.len();
+    let tail_start = total.saturating_sub(PROGRESS_TAIL);
+    let elided = tail_start;
     let lines: Vec<String> = completed
         .iter()
         .enumerate()
+        .skip(tail_start)
         .map(|(i, (st, cfg))| {
             let summary = st.ai_summary.as_deref()
                 .filter(|s| !s.trim().is_empty())
@@ -470,7 +497,13 @@ fn build_progress_block(completed: &[(&crate::config::StageState, &crate::config
             format!("{}. [{}] {}", i + 1, cfg.id, summary)
         })
         .collect();
-    Some(format!("## Progress so far\n{}\n\n---\n\n", lines.join("\n")))
+
+    let header = if elided > 0 {
+        format!("## Progress so far\n*... {} earlier stage{} completed*\n", elided, if elided == 1 { "" } else { "s" })
+    } else {
+        "## Progress so far\n".to_string()
+    };
+    Some(format!("{}{}\n\n---\n\n", header, lines.join("\n")))
 }
 
 pub fn assemble_prompt(

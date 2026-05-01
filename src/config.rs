@@ -69,6 +69,13 @@ pub struct Stage {
     /// to the prompt so the AI can switch via /model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+
+    /// Optional per-stage watchdog timeout in seconds. Overrides the
+    /// pipeline-level `stage_timeout_secs` for this stage only. Useful for
+    /// short stages (lint, format) where 30 min is wasteful, or for long
+    /// stages (large refactors) where 30 min isn't enough.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------

@@ -22,9 +22,14 @@ The `pipeline.json` file is the contract between the skill and the Rust binary.
   "phase": "foundation | implementation | testing",
   "summary": "One-line description shown in the progress header",
   "prompt": "Full prompt text — global_rules are prepended by the binary",
-  "model": "optional — per-stage model override (e.g. claude-haiku-4-5)"
+  "model": "optional — per-stage model override (e.g. claude-haiku-4-5)",
+  "timeout_secs": 300
 }
 ```
+
+`timeout_secs` (optional) — overrides the pipeline-level
+`stage_timeout_secs` for this stage only. Useful for short stages (lint,
+format → 60–300s) or long stages (large refactors → 3600+).
 
 The `model` field is optional. When set:
 - **API/CLI mode**: the binary uses this model for the stage, overriding the

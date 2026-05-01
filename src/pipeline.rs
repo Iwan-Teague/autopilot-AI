@@ -66,15 +66,16 @@ impl Pipeline {
             self.state.current_stage = idx;
             self.persist_state()?;
 
-            // Assemble full prompt — prepend completed stages' summaries for context.
+            // Assemble prompt — split into system (cacheable rules) and user
+            // (changing per stage). API mode caches the system block.
             let completed: Vec<_> = self.state.stages[..idx]
                 .iter()
                 .zip(self.config.stages[..idx].iter())
                 .collect();
-            let prompt = self.assemble_prompt(&stage.prompt, &completed);
+            let (system, user) = self.assemble_prompt(&stage.prompt, &completed);
 
             // Inject — pass per-stage model override when set.
-            self.injector.inject(&prompt, stage.model.as_deref()).await
+            self.injector.inject(system.as_deref(), &user, stage.model.as_deref()).await
                 .with_context(|| format!("Injecting stage '{}'", stage.id))?;
 
             // Wait for completion
@@ -106,31 +107,19 @@ impl Pipeline {
     // Helpers
     // -----------------------------------------------------------------------
 
-    /// Prepend global rules and a rolling progress block to the stage prompt.
+    /// Split the stage prompt into a cacheable `system` block (global rules,
+    /// stable across stages) and a per-stage `user` block (progress + stage
+    /// prompt, changes every stage). The split lets the API injector apply
+    /// Anthropic prompt caching to the system half — a 90% discount on the
+    /// rules tokens for every stage after the first.
     fn assemble_prompt(
         &self,
         stage_prompt: &str,
         completed: &[(&crate::config::StageState, &crate::config::Stage)],
-    ) -> String {
-        // Progress block — use AI summary if available (webhook mode), else config summary.
-        let progress_block = if completed.is_empty() {
-            String::new()
-        } else {
-            let lines: Vec<String> = completed
-                .iter()
-                .enumerate()
-                .map(|(i, (st, cfg))| {
-                    let summary = st.ai_summary.as_deref()
-                        .filter(|s| !s.trim().is_empty())
-                        .unwrap_or(&cfg.summary);
-                    format!("{}. [{}] {}", i + 1, cfg.id, summary)
-                })
-                .collect();
-            format!("## Progress so far\n{}\n\n---\n\n", lines.join("\n"))
-        };
-
-        let rules_block = if self.config.global_rules.is_empty() {
-            String::new()
+    ) -> (Option<String>, String) {
+        // System half — global rules only. Stable across the whole pipeline.
+        let system = if self.config.global_rules.is_empty() {
+            None
         } else {
             let rules = self.config.global_rules
                 .iter()
@@ -138,10 +127,41 @@ impl Pipeline {
                 .map(|(i, r)| format!("{}. {}", i + 1, r))
                 .collect::<Vec<_>>()
                 .join("\n");
-            format!("## Project Rules\n{}\n\n---\n\n", rules)
+            Some(format!("## Project Rules\n{}", rules))
         };
 
-        format!("{}{}{}", rules_block, progress_block, stage_prompt)
+        // User half — rolling progress (capped) + this stage's prompt.
+        const TAIL: usize = 5;
+        let progress_block = if completed.is_empty() {
+            String::new()
+        } else {
+            let total = completed.len();
+            let tail_start = total.saturating_sub(TAIL);
+            let lines: Vec<String> = completed
+                .iter()
+                .enumerate()
+                .skip(tail_start)
+                .map(|(i, (st, cfg))| {
+                    let summary = st.ai_summary.as_deref()
+                        .filter(|s| !s.trim().is_empty())
+                        .unwrap_or(&cfg.summary);
+                    format!("{}. [{}] {}", i + 1, cfg.id, summary)
+                })
+                .collect();
+            let header = if tail_start > 0 {
+                format!(
+                    "## Progress so far\n*... {} earlier stage{} completed*\n",
+                    tail_start,
+                    if tail_start == 1 { "" } else { "s" }
+                )
+            } else {
+                "## Progress so far\n".to_string()
+            };
+            format!("{}{}\n\n---\n\n", header, lines.join("\n"))
+        };
+
+        let user = format!("{}{}", progress_block, stage_prompt);
+        (system, user)
     }
 
     fn persist_state(&self) -> Result<()> {
