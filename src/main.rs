@@ -78,6 +78,14 @@ struct Cli {
     #[arg(long)]
     target_app: Option<String>,
 
+    /// Keystroke to send right after the target app activates and before the
+    /// paste — used to land focus on the chat input box if it wasn't already.
+    /// Format: "mod+key" (e.g. "cmd+l", "ctrl+/", "cmd+shift+m"). Most users
+    /// don't need this — the binary's built-in AX walk locates the chat input
+    /// in most native apps automatically.
+    #[arg(long)]
+    focus_key: Option<String>,
+
     /// Verbose logging.
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
@@ -159,6 +167,9 @@ async fn main() -> Result<()> {
     }
     if let Some(app) = cli.target_app {
         config.target_app = Some(app);
+    }
+    if let Some(fk) = cli.focus_key {
+        config.focus_key = Some(fk);
     }
     if config.auto_paste {
         let support = if cfg!(target_os = "macos") {
@@ -300,12 +311,15 @@ async fn run_webhook(config: PipelineConfig, state: RunState, port: u16) -> Resu
     if config.auto_paste && !config.bootstrap_check {
         let app = config.target_app.clone()
             .unwrap_or_else(|| injector::accessibility::DEFAULT_TARGET_APP.to_string());
+        let opts = injector::accessibility::PasteOptions {
+            focus_key: config.focus_key.clone(),
+        };
         let bootstrap_clone = bootstrap.clone();
         tokio::task::spawn_blocking(move || {
             // Small delay so the user can see the printed kickoff in the
             // terminal before focus jumps to the GUI app.
             std::thread::sleep(std::time::Duration::from_millis(1500));
-            if let Err(e) = injector::accessibility::auto_paste(&bootstrap_clone, &app) {
+            if let Err(e) = injector::accessibility::auto_paste(&bootstrap_clone, &app, &opts) {
                 tracing::error!("Stage 1 auto-paste failed: {}", e);
                 tracing::error!("Falling back to manual paste — copy the kickoff prompt above into your AI agent.");
             } else {

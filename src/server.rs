@@ -298,9 +298,12 @@ async fn stage_complete(
     if inner.config.auto_paste {
         let app = inner.config.target_app.clone()
             .unwrap_or_else(|| crate::injector::accessibility::DEFAULT_TARGET_APP.to_string());
+        let opts = crate::injector::accessibility::PasteOptions {
+            focus_key: inner.config.focus_key.clone(),
+        };
         let prompt_for_paste = prompt.clone();
         tokio::task::spawn_blocking(move || {
-            if let Err(e) = crate::injector::accessibility::auto_paste(&prompt_for_paste, &app) {
+            if let Err(e) = crate::injector::accessibility::auto_paste(&prompt_for_paste, &app, &opts) {
                 tracing::error!("Auto-paste failed: {}", e);
             } else {
                 tracing::info!("Auto-pasted next stage prompt into '{}'", app);

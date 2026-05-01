@@ -25,23 +25,34 @@ use std::time::Duration;
 /// Default app name when the caller doesn't override.
 pub const DEFAULT_TARGET_APP: &str = "Claude";
 
-/// Copy `text` to the clipboard, activate `target_app`, paste, and send.
-pub fn auto_paste(text: &str, target_app: &str) -> Result<()> {
+/// Per-paste tuning. `focus_key` is a keystroke sent right after the app
+/// activates and before the paste — used to land focus on the chat input
+/// when the previously-focused element was something else (editor pane,
+/// file tree, terminal). Format: `"mod+key"` (e.g. `"cmd+l"`, `"ctrl+/"`).
+/// None = rely on AX-based focus only.
+#[derive(Debug, Clone, Default)]
+pub struct PasteOptions {
+    pub focus_key: Option<String>,
+}
+
+/// Copy `text` to the clipboard, activate `target_app`, focus the input,
+/// paste, and send.
+pub fn auto_paste(text: &str, target_app: &str, opts: &PasteOptions) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        return macos::auto_paste(text, target_app);
+        return macos::auto_paste(text, target_app, opts);
     }
     #[cfg(target_os = "linux")]
     {
-        return linux::auto_paste(text, target_app);
+        return linux::auto_paste(text, target_app, opts);
     }
     #[cfg(target_os = "windows")]
     {
-        return windows::auto_paste(text, target_app);
+        return windows::auto_paste(text, target_app, opts);
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
-        let _ = (text, target_app);
+        let _ = (text, target_app, opts);
         bail!("auto-paste is unsupported on this OS")
     }
 }
@@ -94,20 +105,58 @@ fn pipe_text_to(cmd: &mut Command, text: &str) -> Result<()> {
 mod macos {
     use super::*;
 
-    pub fn auto_paste(text: &str, app: &str) -> Result<()> {
+    pub fn auto_paste(text: &str, app: &str, opts: &PasteOptions) -> Result<()> {
         pipe_text_to(&mut Command::new("pbcopy"), text)
             .context("pbcopy: writing prompt to clipboard")?;
         std::thread::sleep(Duration::from_millis(60));
 
+        // Build the keystroke prefix that lands focus on the chat input
+        // BEFORE pasting. Two-stage strategy:
+        //   1. AX-poke: walk window 1's role hierarchy and call
+        //      `set focused of` on the first text-area / text-field we find.
+        //      Works for most native macOS chat apps. Wrapped in `try` so a
+        //      missing element doesn't blow up the whole script.
+        //   2. Optional user-supplied focus_key (e.g. "cmd+l") for apps
+        //      that have a dedicated focus-chat shortcut, or to recover
+        //      when the AX walk found the wrong element.
+        let focus_keystroke = opts.focus_key.as_deref()
+            .map(translate_focus_key)
+            .transpose()?
+            .map(|k| format!(r#"
+delay 0.05
+tell application "System Events"
+    {k}
+end tell"#))
+            .unwrap_or_default();
+
+        let app_esc = escape_applescript(app);
         let script = format!(
-            r#"tell application "{app}" to activate
+            r#"tell application "{app_esc}" to activate
 delay 0.35
+tell application "System Events"
+    tell process "{app_esc}"
+        try
+            -- Walk a few common element types and focus the first hit.
+            try
+                set focused of (first text area of window 1) to true
+            on error
+                try
+                    set focused of (first text field of window 1) to true
+                on error
+                    try
+                        set focused of (first scroll area of window 1 whose role description contains "text") to true
+                    end try
+                end try
+            end try
+        end try
+    end tell
+end tell{focus_keystroke}
+delay 0.08
 tell application "System Events"
     keystroke "v" using command down
     delay 0.12
     keystroke return using command down
-end tell"#,
-            app = escape_applescript(app)
+end tell"#
         );
         let out = Command::new("osascript")
             .arg("-e").arg(&script)
@@ -136,6 +185,46 @@ end tell"#,
         }
         out
     }
+
+    /// Convert "mod+key" (e.g. "cmd+l", "shift+ctrl+a") into an AppleScript
+    /// keystroke line.
+    fn translate_focus_key(spec: &str) -> Result<String> {
+        let parts: Vec<&str> = spec.split('+').map(|s| s.trim()).collect();
+        if parts.is_empty() {
+            bail!("--focus-key is empty");
+        }
+        let key = parts.last().unwrap();
+        let mods: Vec<&str> = parts[..parts.len() - 1].to_vec();
+
+        let mod_clause = if mods.is_empty() {
+            String::new()
+        } else {
+            let names: Vec<String> = mods.iter().map(|m| match m.to_lowercase().as_str() {
+                "cmd" | "command" | "meta" => "command down".to_string(),
+                "ctrl" | "control" => "control down".to_string(),
+                "shift" => "shift down".to_string(),
+                "alt" | "option" => "option down".to_string(),
+                other => format!("?? unknown modifier '{other}' ??"),
+            }).collect();
+            format!(" using {{{}}}", names.join(", "))
+        };
+
+        // Named keys → key code; printable single chars → keystroke "x".
+        let lower = key.to_lowercase();
+        let line = match lower.as_str() {
+            "return" | "enter" => format!("key code 36{mod_clause}"),
+            "escape" | "esc"   => format!("key code 53{mod_clause}"),
+            "tab"              => format!("key code 48{mod_clause}"),
+            "space"            => format!("key code 49{mod_clause}"),
+            "delete" | "backspace" => format!("key code 51{mod_clause}"),
+            _ if key.chars().count() == 1 => {
+                let c = key.chars().next().unwrap();
+                format!("keystroke \"{c}\"{mod_clause}")
+            }
+            _ => bail!("unsupported focus-key '{}': use mod+single-char or mod+return/escape/tab/space", spec),
+        };
+        Ok(line)
+    }
 }
 
 // ===========================================================================
@@ -146,11 +235,11 @@ end tell"#,
 mod linux {
     use super::*;
 
-    pub fn auto_paste(text: &str, app: &str) -> Result<()> {
+    pub fn auto_paste(text: &str, app: &str, opts: &PasteOptions) -> Result<()> {
         if is_wayland() {
-            wayland_paste(text, app)
+            wayland_paste(text, app, opts)
         } else {
-            x11_paste(text, app)
+            x11_paste(text, app, opts)
         }
     }
 
@@ -161,7 +250,7 @@ mod linux {
                 .unwrap_or(false)
     }
 
-    fn x11_paste(text: &str, app: &str) -> Result<()> {
+    fn x11_paste(text: &str, app: &str, opts: &PasteOptions) -> Result<()> {
         // Clipboard.
         if tool_exists("xclip") {
             pipe_text_to(
@@ -190,13 +279,39 @@ mod linux {
         }
         std::thread::sleep(Duration::from_millis(350));
 
+        // Optional focus-chat keystroke before paste (e.g. "ctrl+l").
+        if let Some(spec) = opts.focus_key.as_deref() {
+            let key = translate_xdotool_key(spec)?;
+            Command::new("xdotool").args(["key", &key]).status()
+                .context("xdotool focus-key")?;
+            std::thread::sleep(Duration::from_millis(80));
+        }
+
         Command::new("xdotool").args(["key", "ctrl+v"]).status()?;
         std::thread::sleep(Duration::from_millis(120));
         Command::new("xdotool").args(["key", "ctrl+Return"]).status()?;
         Ok(())
     }
 
-    fn wayland_paste(text: &str, _app: &str) -> Result<()> {
+    fn translate_xdotool_key(spec: &str) -> Result<String> {
+        // xdotool already speaks "mod+key" — we just normalise common
+        // names so the user can use the same syntax across OSes.
+        let parts: Vec<&str> = spec.split('+').map(|s| s.trim()).collect();
+        let mut out = Vec::with_capacity(parts.len());
+        for p in &parts {
+            out.push(match p.to_lowercase().as_str() {
+                "cmd" | "command" | "meta" => "ctrl".to_string(), // map cmd→ctrl on Linux
+                "control" => "ctrl".to_string(),
+                "alt" | "option" => "alt".to_string(),
+                "return" | "enter" => "Return".to_string(),
+                "escape" | "esc"   => "Escape".to_string(),
+                _ => p.to_string(),
+            });
+        }
+        Ok(out.join("+"))
+    }
+
+    fn wayland_paste(text: &str, _app: &str, opts: &PasteOptions) -> Result<()> {
         if !tool_exists("wl-copy") {
             bail!("auto-paste needs wl-copy on Wayland. Install: apt install wl-clipboard");
         }
@@ -211,6 +326,21 @@ mod linux {
         std::thread::sleep(Duration::from_millis(1500));
 
         if tool_exists("wtype") {
+            // Optional focus key — best-effort, single-modifier "mod+key" only.
+            if let Some(spec) = opts.focus_key.as_deref() {
+                if let Some((m, k)) = spec.rsplit_once('+') {
+                    let m = match m.to_lowercase().as_str() {
+                        "cmd" | "command" | "meta" | "ctrl" | "control" => "ctrl",
+                        "alt" | "option" => "alt",
+                        "shift" => "shift",
+                        _ => "ctrl",
+                    };
+                    let _ = Command::new("wtype")
+                        .args(["-M", m, k, "-m", m])
+                        .status();
+                    std::thread::sleep(Duration::from_millis(80));
+                }
+            }
             // wtype: -M holds modifier, -k presses a named key, -m releases mod.
             Command::new("wtype")
                 .args(["-M", "ctrl", "v", "-m", "ctrl"])
@@ -223,6 +353,10 @@ mod linux {
                 .context("wtype send")?;
             Ok(())
         } else if tool_exists("ydotool") {
+            // ydotool focus_key not supported here — too many keysym→evdev
+            // codes to maintain. Users on Wayland+ydotool: prefer wtype, or
+            // manually focus the chat input.
+            let _ = &opts.focus_key;
             // Linux input event codes: ctrl=29, v=47, enter=28. ":1" press, ":0" release.
             Command::new("ydotool")
                 .args(["key", "29:1", "47:1", "47:0", "29:0"])
@@ -251,7 +385,20 @@ mod linux {
 mod windows {
     use super::*;
 
-    pub fn auto_paste(text: &str, app: &str) -> Result<()> {
+    pub fn auto_paste(text: &str, app: &str, opts: &PasteOptions) -> Result<()> {
+        // SendKeys focus shortcut — optional, applied between activation and
+        // the actual paste. Map "mod+key" → SendKeys notation: ^=ctrl,
+        // +=shift, %=alt. Single-letter keys go literal; named keys wrap in {}.
+        let focus_block = match opts.focus_key.as_deref() {
+            None => String::new(),
+            Some(spec) => {
+                let sk = focus_key_to_sendkeys(spec);
+                format!(
+                    "Start-Sleep -Milliseconds 80\n[System.Windows.Forms.SendKeys]::SendWait('{sk}')\nStart-Sleep -Milliseconds 80\n"
+                )
+            }
+        };
+
         // PowerShell handles clipboard, window activation, and SendKeys all
         // in one shot. Pipe the prompt as input to avoid quoting hell.
         let script = format!(
@@ -275,11 +422,12 @@ if (-not $proc) {{
 [Win]::ShowWindow($proc.MainWindowHandle, 9) | Out-Null
 [Win]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
 Start-Sleep -Milliseconds 350
-[System.Windows.Forms.SendKeys]::SendWait('^v')
+{focus_block}[System.Windows.Forms.SendKeys]::SendWait('^v')
 Start-Sleep -Milliseconds 120
 [System.Windows.Forms.SendKeys]::SendWait('^{{ENTER}}')
 "#,
-            app = app.replace('"', "`\"")
+            app = app.replace('"', "`\""),
+            focus_block = focus_block,
         );
 
         let mut child = Command::new("powershell")
@@ -329,6 +477,43 @@ Start-Sleep -Milliseconds 120
             );
         }
         Ok(())
+    }
+
+    /// Convert "mod+key" into a SendKeys-compatible string.
+    fn focus_key_to_sendkeys(spec: &str) -> String {
+        let parts: Vec<&str> = spec.split('+').map(|s| s.trim()).collect();
+        if parts.is_empty() { return String::new(); }
+        let key = *parts.last().unwrap();
+        let mods = &parts[..parts.len() - 1];
+        let mut out = String::new();
+        for m in mods {
+            match m.to_lowercase().as_str() {
+                "cmd" | "command" | "meta" | "ctrl" | "control" => out.push('^'),
+                "shift" => out.push('+'),
+                "alt" | "option" => out.push('%'),
+                _ => {}
+            }
+        }
+        let lower = key.to_lowercase();
+        match lower.as_str() {
+            "return" | "enter" => out.push_str("{ENTER}"),
+            "escape" | "esc"   => out.push_str("{ESC}"),
+            "tab"              => out.push_str("{TAB}"),
+            "space"            => out.push_str(" "),
+            _ if key.chars().count() == 1 => {
+                let c = key.chars().next().unwrap();
+                // SendKeys reserved chars need wrapping
+                if "+^%~(){}[]".contains(c) {
+                    out.push('{');
+                    out.push(c);
+                    out.push('}');
+                } else {
+                    out.push(c);
+                }
+            }
+            _ => out.push_str(key),
+        }
+        out
     }
 
     /// Tiny base64 encoder so we don't pull in another dep just for this.

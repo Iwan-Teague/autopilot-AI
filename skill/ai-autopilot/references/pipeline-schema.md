@@ -50,6 +50,20 @@ the app `auto_paste` should activate. Common values: `"Claude"`,
 `"Codex"`, `"Claude Code"`, `"ChatGPT"`, `"Cursor"`. Match the title
 that appears in your OS window manager.
 
+`focus_key` (optional) — keystroke to send right after the target app
+activates and before the paste fires. Used to land focus on the chat
+input when the previously-focused element was something else (editor
+pane, file tree, terminal). Format: `"mod+key"` — e.g. `"cmd+l"`,
+`"ctrl+/"`, `"cmd+shift+m"`. Most users don't need this: the binary's
+AX walk locates the chat input automatically in most native chat apps.
+Set it when the AX walk lands in the wrong place, or when paste sends
+into an editor instead of chat.
+
+Modifier names: `cmd` (= `command` / `meta`, mapped to `ctrl` on
+Linux/Windows), `ctrl`, `shift`, `alt` (= `option`). Named keys:
+`return`, `escape`, `tab`, `space`, `delete`. Otherwise a single
+printable character.
+
 ## Stage object
 
 ```json
