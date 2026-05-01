@@ -50,7 +50,57 @@ Auto-detection tries webhook → API → CLI in that order.
 
 ---
 
-## Step 0 — Confirm working branch
+## Step 0a — Detect the host environment
+
+Before anything else, work out two things and remember them through the
+rest of the skill — they decide which interface mode and auto-paste
+settings to recommend.
+
+### Operating system
+
+Run one shell command:
+
+```bash
+uname -sm 2>/dev/null || ver
+```
+
+Map to:
+* `Darwin *` → **macOS**
+* `Linux *` → **Linux** (probe `XDG_SESSION_TYPE` to distinguish X11 / Wayland)
+* `MINGW* | MSYS* | CYGWIN*` or `Microsoft Windows *` → **Windows**
+
+### CLI vs GUI
+
+Ask the user once, plainly:
+
+> "Quick check before I build the pipeline: is your AI agent running in
+> a GUI (Claude desktop, Claude Code, Codex desktop, Cursor, ChatGPT
+> desktop, etc.) or a terminal CLI (`claude` / `codex` / equivalent)?
+> [GUI / CLI]"
+
+Heuristic if the user wants you to guess: on macOS run
+`pgrep -lf "Claude|Cursor|Codex|ChatGPT" 2>/dev/null` — if a chat-app
+process is up, GUI is the safer default. On Linux: `pgrep -lf` against
+the same names. On Windows: `tasklist /fi "windowtitle eq Claude*"`.
+Don't over-trust the heuristic — confirm with the user.
+
+### Use the answers
+
+Combine OS + interface to pick mode for Step 2's table:
+
+| Interface | Mode |
+|---|---|
+| GUI, any OS  | Webhook + (auto-paste recommended for >8 stages) |
+| CLI (`claude`/`codex`) | `--interface cli` (binary spawns the subprocess; no auto-paste needed) |
+| Headless / API key set | `--interface api` |
+
+Carry these decisions into the Step 4 confirmation summary so the user
+sees the chosen interface and (where applicable) `--auto-paste` flag
+before kickoff.
+
+---
+
+## Step 0b — Confirm working branch
 
 Detect the repo's current branch:
 
@@ -339,6 +389,8 @@ Present the full pipeline before writing any files:
    N. [test-suite]        <summary>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Stages: <N>  |  Interface: webhook (auto)
+  Host: <macOS/Linux/Windows>  |  Agent: <GUI:Claude / CLI:claude / API>
+  Auto-paste: <on — pasting into "Claude" | off>
   Branch: <current branch>  (pinned: <yes/no>)
   Model tiering: <enabled — show per-stage model> | disabled
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
