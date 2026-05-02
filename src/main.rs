@@ -283,51 +283,74 @@ async fn run_webhook(config: PipelineConfig, state: RunState, port: u16) -> Resu
         config.bootstrap_check,
     );
 
-    println!("{}", "━".repeat(70));
-    if config.auto_paste {
-        let app = config.target_app.as_deref()
-            .unwrap_or(injector::accessibility::DEFAULT_TARGET_APP);
-        println!("  AUTO-PASTE MODE — pasting into '{}' on every stage", app);
-    } else if config.bootstrap_check {
-        println!("  PASTE THIS INTO YOUR AI AGENT TO BEGIN  (bootstrap-check ON)");
-    } else {
-        println!("  PASTE THIS INTO YOUR AI AGENT TO BEGIN  (auto-start, no /ready handshake)");
-    }
-    println!("{}", "━".repeat(70));
-    println!();
-    println!("{}", bootstrap);
-    println!();
-    println!("{}", "━".repeat(70));
-    if config.stage_timeout_secs > 0 {
-        println!("  Watchdog: {}min timeout per stage", config.stage_timeout_secs / 60);
-    }
-    println!("  Waiting for {} stage(s) to complete...", total - current);
-    println!("  Progress:  GET http://localhost:{}/status", port);
-    println!("  Summary:   ./autopilot-summary.md (written as stages complete)");
-    println!("{}", "━".repeat(70));
-    println!();
-
-    // Auto-paste stage 1 kickoff into the target app — user gives focus to
-    // it within ~1.5s. Skipped when bootstrap_check is on (legacy mode keeps
-    // the manual paste flow).
+    // Decide kickoff delivery mode and report it cleanly to whoever is
+    // watching the binary's stdout (typically the agent's bash tool).
     if config.auto_paste && !config.bootstrap_check {
         let app = config.target_app.clone()
             .unwrap_or_else(|| injector::accessibility::DEFAULT_TARGET_APP.to_string());
         let opts = injector::accessibility::PasteOptions {
             focus_key: config.focus_key.clone(),
         };
-        let bootstrap_clone = bootstrap.clone();
-        tokio::task::spawn_blocking(move || {
-            // Small delay so the user can see the printed kickoff in the
-            // terminal before focus jumps to the GUI app.
-            std::thread::sleep(std::time::Duration::from_millis(1500));
-            if let Err(e) = injector::accessibility::auto_paste(&bootstrap_clone, &app, &opts) {
-                tracing::error!("Stage 1 auto-paste failed: {}", e);
-                tracing::error!("Falling back to manual paste — copy the kickoff prompt above into your AI agent.");
-            } else {
-                tracing::info!("Stage 1 kickoff auto-pasted into '{}'", app);
+
+        println!("{}", "━".repeat(70));
+        println!("  AUTO-PASTE — delivering kickoff to '{}'", app);
+        println!("{}", "━".repeat(70));
+
+        // Synchronous paste so success/failure is visible immediately.
+        // Per-stage continuations (handled in server.rs) stay async — only
+        // stage 1 is critical to verify before we hand control to the user.
+        match injector::accessibility::auto_paste(&bootstrap, &app, &opts) {
+            Ok(()) => {
+                println!("  ✓ Stage 1 prompt pasted and submitted to '{}'.", app);
+                println!("  Pipeline running. Subsequent stages will paste automatically.");
+                println!();
+                println!("  Watchdog: {}min/stage  ·  Status: GET http://localhost:{}/status",
+                    if config.stage_timeout_secs > 0 { config.stage_timeout_secs / 60 } else { 0 },
+                    port);
+                println!("  Summary file: ./autopilot-summary.md");
+                println!("{}", "━".repeat(70));
+                println!();
             }
-        });
+            Err(e) => {
+                println!("  ✗ Auto-paste FAILED: {}", e);
+                println!();
+                println!("  Most likely cause: the app that launched this binary doesn't have");
+                println!("  Accessibility permission. macOS: System Settings → Privacy &");
+                println!("  Security → Accessibility → enable the launching app (Terminal /");
+                println!("  iTerm / Claude / Cursor / VS Code etc).");
+                println!();
+                println!("  Falling back to manual paste — copy the prompt below into your");
+                println!("  AI agent to begin. Subsequent stages will retry auto-paste; if");
+                println!("  the perm is still missing, those will fail too — fix it now and");
+                println!("  resume with --resume to recover the run.");
+                println!("{}", "━".repeat(70));
+                println!();
+                println!("{}", bootstrap);
+                println!();
+                println!("{}", "━".repeat(70));
+            }
+        }
+    } else {
+        // No auto-paste — print bootstrap for manual paste.
+        println!("{}", "━".repeat(70));
+        if config.bootstrap_check {
+            println!("  PASTE THIS INTO YOUR AI AGENT TO BEGIN  (bootstrap-check ON)");
+        } else {
+            println!("  PASTE THIS INTO YOUR AI AGENT TO BEGIN  (auto-start, no /ready handshake)");
+        }
+        println!("{}", "━".repeat(70));
+        println!();
+        println!("{}", bootstrap);
+        println!();
+        println!("{}", "━".repeat(70));
+        if config.stage_timeout_secs > 0 {
+            println!("  Watchdog: {}min timeout per stage", config.stage_timeout_secs / 60);
+        }
+        println!("  Waiting for {} stage(s) to complete...", total - current);
+        println!("  Progress:  GET http://localhost:{}/status", port);
+        println!("  Summary:   ./autopilot-summary.md (written as stages complete)");
+        println!("{}", "━".repeat(70));
+        println!();
     }
 
     // Block until all stages complete (server signals via done_rx).
