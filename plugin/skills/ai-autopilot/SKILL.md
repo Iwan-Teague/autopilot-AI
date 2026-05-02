@@ -86,17 +86,23 @@ Don't over-trust the heuristic — confirm with the user.
 
 ### Use the answers
 
-Combine OS + interface to pick mode for Step 2's table:
+Combine OS + interface to pick mode:
 
 | Interface | Mode |
 |---|---|
-| GUI, any OS  | Webhook + (auto-paste recommended for >8 stages) |
+| GUI, any OS  | **Webhook + `--auto-paste` (always)** — no manual pasting, even for short pipelines |
 | CLI (`claude`/`codex`) | `--interface cli` (binary spawns the subprocess; no auto-paste needed) |
 | Headless / API key set | `--interface api` |
 
+**`--auto-paste` is the default whenever the user picked GUI.** Don't
+make it conditional on stage count — short pipelines benefit from it
+just as much (no manual paste at kickoff). Only turn it off if the
+user explicitly opts out, or if the OS is Linux Wayland and they
+haven't installed `wtype`/`ydotool` (in which case fall back to
+manual paste with an explicit instruction telling them so).
+
 Carry these decisions into the Step 4 confirmation summary so the user
-sees the chosen interface and (where applicable) `--auto-paste` flag
-before kickoff.
+sees the chosen interface and the `--auto-paste` flag before kickoff.
 
 ---
 
@@ -459,14 +465,34 @@ Build once (or after source changes):
 cd /Users/iwan/Desktop/autopilot-ai && cargo build --release 2>&1
 ```
 
-**Webhook mode — recommended for Claude Code / Codex / any local agent:**
+**Webhook mode — default for any local agent.**
+
+If the user is on a **GUI** (from Step 0a), launch with `--auto-paste`
+so the kickoff and every continuation are pasted automatically:
 
 ```bash
-./target/release/autopilot --pipeline pipeline.json
+./target/release/autopilot --pipeline pipeline.json --auto-paste
 ```
 
-The binary prints the first prompt. Paste it into your AI agent. It will work
-through every stage automatically, calling the local server after each one.
+If the user is on a **CLI** agent, use `--interface cli`:
+
+```bash
+./target/release/autopilot --pipeline pipeline.json --interface cli
+```
+
+If the user is **headless** with an API key, use `--interface api`:
+
+```bash
+./target/release/autopilot --pipeline pipeline.json --interface api
+```
+
+**Do not tell GUI users to manually paste the first prompt.** When
+`--auto-paste` is active the binary handles delivery itself — your job
+is to run the binary and report that auto-paste fired. If auto-paste
+fails (e.g. macOS Accessibility permission not yet granted), only then
+fall back to printing the kickoff prompt and asking the user to paste
+it manually, plus tell them how to grant the permission so subsequent
+runs work.
 
 Check progress at any time:
 ```bash
