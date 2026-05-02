@@ -27,42 +27,10 @@ Override at runtime with `--branch X`. Omit (or null) to operate on
 whatever branch is currently checked out. The kickoff summary always
 shows the active branch regardless of whether it's pinned.
 
-`auto_paste` (optional, default `false`) — cross-platform. After every
-`/stage-complete`, the binary copies the next stage prompt to the
-clipboard, activates the target GUI app, and sends paste + send. Each
-new stage arrives as a fresh chat turn instead of hidden inside an
-HTTP response, so the AI agent has no "summarise mid-pipeline"
-offramp. Recommended for any pipeline >8 stages on a chat GUI. Toggle
-at runtime with `--auto-paste`.
-
-Platform requirements:
-* **macOS** — bundled `pbcopy` + `osascript`. First run requires
-  Accessibility permission for the launching terminal.
-* **Linux X11** — `xclip` (or `xsel`) + `xdotool`.
-* **Linux Wayland** — `wl-copy` + `wtype` (or `ydotool` daemon). User
-  must focus the target app within 1.5s of each stage start (Wayland
-  blocks programmatic window activation).
-* **Windows** — bundled PowerShell + Set-Clipboard + SendKeys. No
-  installs.
-
-`target_app` (optional, default `"Claude"`) — display-name substring of
-the app `auto_paste` should activate. Common values: `"Claude"`,
-`"Codex"`, `"Claude Code"`, `"ChatGPT"`, `"Cursor"`. Match the title
-that appears in your OS window manager.
-
-`focus_key` (optional) — keystroke to send right after the target app
-activates and before the paste fires. Used to land focus on the chat
-input when the previously-focused element was something else (editor
-pane, file tree, terminal). Format: `"mod+key"` — e.g. `"cmd+l"`,
-`"ctrl+/"`, `"cmd+shift+m"`. Most users don't need this: the binary's
-AX walk locates the chat input automatically in most native chat apps.
-Set it when the AX walk lands in the wrong place, or when paste sends
-into an editor instead of chat.
-
-Modifier names: `cmd` (= `command` / `meta`, mapped to `ctrl` on
-Linux/Windows), `ctrl`, `shift`, `alt` (= `option`). Named keys:
-`return`, `escape`, `tab`, `space`, `delete`. Otherwise a single
-printable character.
+**Removed in this version:** the `auto_paste`, `target_app`, and
+`focus_key` fields used by the GUI auto-paste mode have been dropped.
+The skill now drives stages via `cli` (subprocess) or `api` (REST)
+mode — both fully driven by the binary, no GUI keystroke simulation.
 
 ## Stage object
 

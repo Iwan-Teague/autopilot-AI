@@ -59,26 +59,6 @@ pub struct PipelineConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
 
-    /// When true, after every `/stage-complete` the binary copies the next
-    /// stage prompt to the clipboard, activates the target GUI app, and
-    /// pastes (cmd+v + cmd+return). Reliably forces long pipelines through
-    /// without depending on the AI agent's voluntary self-chain. macOS only.
-    #[serde(default)]
-    pub auto_paste: bool,
-
-    /// Name of the app to activate when `auto_paste` is on (default "Claude").
-    /// Override for the Claude desktop variant on your system or any other
-    /// chat GUI that accepts cmd+v + cmd+return as "send message".
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target_app: Option<String>,
-
-    /// Optional keystroke that lands focus on the chat input box right after
-    /// the target app activates and before the paste fires. Without it,
-    /// auto-paste relies on AX-finding the first text area in the window
-    /// (works for most native chat apps) plus whatever happened to be
-    /// focused last. Format: `"mod+key"` — e.g. `"cmd+l"`, `"ctrl+/"`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub focus_key: Option<String>,
 
     /// Where runtime state is persisted for resume support.
     #[serde(default = "default_state_path")]

@@ -50,15 +50,9 @@ Auto-detection tries webhook → API → CLI in that order.
 
 ---
 
-## Step 0a — Detect the host environment
+## Step 0a — Detect host OS
 
-Before anything else, work out two things and remember them through the
-rest of the skill — they decide which interface mode and auto-paste
-settings to recommend.
-
-### Operating system
-
-Run one shell command:
+Run:
 
 ```bash
 uname -sm 2>/dev/null || ver
@@ -66,43 +60,37 @@ uname -sm 2>/dev/null || ver
 
 Map to:
 * `Darwin *` → **macOS**
-* `Linux *` → **Linux** (probe `XDG_SESSION_TYPE` to distinguish X11 / Wayland)
+* `Linux *` → **Linux**
 * `MINGW* | MSYS* | CYGWIN*` or `Microsoft Windows *` → **Windows**
 
-### CLI vs GUI
+Surface this in the Step 4 confirmation summary so the user sees which
+host the binary will run on. No interactive question needed.
 
-Ask the user once, plainly:
+### Pick the interface
 
-> "Quick check before I build the pipeline: is your AI agent running in
-> a GUI (Claude desktop, Claude Code, Codex desktop, Cursor, ChatGPT
-> desktop, etc.) or a terminal CLI (`claude` / `codex` / equivalent)?
-> [GUI / CLI]"
+The autopilot drives stages via one of three modes — the binary
+auto-detects when omitted, but the skill should know which one will
+run so it can warn the user up front:
 
-Heuristic if the user wants you to guess: on macOS run
-`pgrep -lf "Claude|Cursor|Codex|ChatGPT" 2>/dev/null` — if a chat-app
-process is up, GUI is the safer default. On Linux: `pgrep -lf` against
-the same names. On Windows: `tasklist /fi "windowtitle eq Claude*"`.
-Don't over-trust the heuristic — confirm with the user.
-
-### Use the answers
-
-Combine OS + interface to pick mode:
-
-| Interface | Mode |
+| Available locally | Mode the binary picks |
 |---|---|
-| GUI, any OS  | **Webhook + `--auto-paste` (always)** — no manual pasting, even for short pipelines |
-| CLI (`claude`/`codex`) | `--interface cli` (binary spawns the subprocess; no auto-paste needed) |
-| Headless / API key set | `--interface api` |
+| `claude` or `codex` CLI in PATH | `--interface cli` (subprocess per stage) — recommended |
+| API key in env (`ANTHROPIC_API_KEY` etc) | `--interface api` (REST per stage) |
+| Neither | `--interface webhook` (manual self-chain via curl) |
 
-**`--auto-paste` is the default whenever the user picked GUI.** Don't
-make it conditional on stage count — short pipelines benefit from it
-just as much (no manual paste at kickoff). Only turn it off if the
-user explicitly opts out, or if the OS is Linux Wayland and they
-haven't installed `wtype`/`ydotool` (in which case fall back to
-manual paste with an explicit instruction telling them so).
+Quick probe:
 
-Carry these decisions into the Step 4 confirmation summary so the user
-sees the chosen interface and the `--auto-paste` flag before kickoff.
+```bash
+which claude codex 2>/dev/null
+env | grep -E '^(ANTHROPIC|OPENAI|MISTRAL|GROQ|TOGETHER)_API_KEY=' | head -3
+```
+
+If neither CLI nor API key is present, tell the user to install one:
+
+> "No local AI CLI or API key found. Install the Claude CLI for the
+> smoothest experience: `npm install -g @anthropic-ai/claude-code`.
+> Falling back to webhook mode (you'll paste the kickoff prompt
+> manually) — re-run after install for the auto-driven flow."
 
 ---
 
@@ -200,39 +188,12 @@ directive is. Pick the right mode:
 
 | Stages | Recommended mode |
 |---|---|
-| ≤ 8  | Webhook (default) — fine end-to-end |
-| 9+ on a chat GUI (Claude desktop, Claude Code, Codex, ChatGPT, Cursor…) | **Webhook + `--auto-paste`** — binary drives the chat by simulating clipboard paste + send into the app on every stage. The next stage arrives as a fresh user message, eliminating the "milestone offramp" |
-| 9+ headless | **API mode** (`--interface api`, requires `ANTHROPIC_API_KEY`) — binary calls the API directly, no UI agent involved |
-| > 30 | Split into sequential mini-pipelines |
+| Any length, `claude`/`codex` CLI in PATH | **`--interface cli`** — the binary spawns the CLI per stage. Each stage gets a fresh subprocess, so context drift and milestone offramps don't apply. Recommended. |
+| Any length, API key in env | **`--interface api`** — binary calls the provider REST per stage. Anthropic gets prompt caching for free. |
+| Neither CLI nor API key | **`--interface webhook`** — fallback only. AI must self-chain via curl, which fails reliably on >8 stage runs. Install `claude` CLI (`npm install -g @anthropic-ai/claude-code`) for anything serious. |
 
-`--auto-paste` runs on macOS, Linux (X11 or Wayland), and Windows. It
-copies the prompt, activates the target app, then sends paste + send.
-Per-platform requirements:
-
-| OS | Tools / permissions |
-|---|---|
-| macOS   | Bundled `pbcopy` + `osascript`. First run grants Accessibility permission to your terminal (System Settings → Privacy & Security → Accessibility). |
-| Linux X11 | `xclip` (or `xsel`) + `xdotool`. `apt install xclip xdotool`. |
-| Linux Wayland | `wl-copy` + `wtype` (or `ydotool` daemon). `apt install wl-clipboard wtype`. Wayland forbids programmatic window activation, so the user has 1.5s to focus the target app each stage. |
-| Windows | Bundled PowerShell. No installs needed. |
-
-`--target-app` picks the app by display-name substring. Default
-`"Claude"`. Common values:
-
-* `"Claude"` — Claude desktop
-* `"Codex"` — OpenAI Codex desktop (where it ships as a window)
-* `"Claude Code"` — Claude Code
-* `"ChatGPT"` — ChatGPT desktop
-* `"Cursor"` — Cursor IDE chat panel
-
-For Codex headlessly, prefer `--interface cli` (spawns `codex -p`
-subprocess per stage — fully driven by the binary, no GUI involved).
-Auto-paste is the right pick when the user wants to watch work happen
-in the desktop app.
-
-Tell the user which mode is recommended for their pipeline length in
-the Step 4 confirmation summary. For >8 stages on the Claude desktop
-app specifically, recommend `--auto-paste`.
+Tell the user the picked mode in the Step 4 confirmation summary so
+they catch a misdetection before kickoff.
 
 ### Stage organisation
 
@@ -350,13 +311,13 @@ If the user says yes:
    inside Claude desktop / Claude Code / Codex / etc:
    ```bash
    # CLI agent or headless API key set:
-   python3 /Users/iwan/Desktop/autopilot-ai/plugin/skills/ai-autopilot/scripts/detect_models.py
+   python3 /path/to/skill/ai-autopilot/scripts/detect_models.py
 
    # GUI agent (use the right host name):
-   python3 /Users/iwan/Desktop/autopilot-ai/plugin/skills/ai-autopilot/scripts/detect_models.py --host claude
-   python3 /Users/iwan/Desktop/autopilot-ai/plugin/skills/ai-autopilot/scripts/detect_models.py --host codex
-   python3 /Users/iwan/Desktop/autopilot-ai/plugin/skills/ai-autopilot/scripts/detect_models.py --host chatgpt
-   python3 /Users/iwan/Desktop/autopilot-ai/plugin/skills/ai-autopilot/scripts/detect_models.py --host cursor
+   python3 /path/to/skill/ai-autopilot/scripts/detect_models.py --host claude
+   python3 /path/to/skill/ai-autopilot/scripts/detect_models.py --host codex
+   python3 /path/to/skill/ai-autopilot/scripts/detect_models.py --host chatgpt
+   python3 /path/to/skill/ai-autopilot/scripts/detect_models.py --host cursor
    ```
    It emits JSON: `[{provider, model, tier, source}, ...]`.
    Note that GUI-host entries are advisory — in webhook mode the binary
@@ -408,10 +369,8 @@ Present the full pipeline before writing any files:
   ── Testing ──
    N. [test-suite]        <summary>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Stages: <N>  |  Interface: webhook (auto)
-  Host: <macOS/Linux/Windows>  |  Agent: <GUI:Claude / CLI:claude / API>
-  Auto-paste: <on — pasting into "Claude" | off>
-  Branch: <current branch>  (pinned: <yes/no>)
+  Stages: <N>  |  Interface: <cli / api / webhook>
+  Host: <macOS/Linux/Windows>  |  Branch: <current> (pinned: <yes/no>)
   Model tiering: <enabled — show per-stage model> | disabled
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -428,7 +387,7 @@ Wait for explicit confirmation before proceeding.
 Run the parser script:
 
 ```bash
-python3 /Users/iwan/Desktop/autopilot-ai/plugin/skills/ai-autopilot/scripts/parse_pipeline.py \
+python3 /path/to/skill/ai-autopilot/scripts/parse_pipeline.py \
   --spec <path-to-spec.md> \
   --output pipeline.json
 ```
@@ -465,34 +424,28 @@ Build once (or after source changes):
 cd /Users/iwan/Desktop/autopilot-ai && cargo build --release 2>&1
 ```
 
-**Webhook mode — default for any local agent.**
-
-If the user is on a **GUI** (from Step 0a), launch with `--auto-paste`
-so the kickoff and every continuation are pasted automatically:
+**Default — let the binary auto-detect:**
 
 ```bash
-./target/release/autopilot --pipeline pipeline.json --auto-paste
+./target/release/autopilot --pipeline pipeline.json
 ```
 
-If the user is on a **CLI** agent, use `--interface cli`:
+The binary picks `cli` if `claude` / `codex` is in PATH, then `api` if
+a provider env key is set, else falls back to `webhook` (manual paste).
+
+Force a specific mode if you need to:
 
 ```bash
 ./target/release/autopilot --pipeline pipeline.json --interface cli
-```
-
-If the user is **headless** with an API key, use `--interface api`:
-
-```bash
 ./target/release/autopilot --pipeline pipeline.json --interface api
+./target/release/autopilot --pipeline pipeline.json --interface webhook
 ```
 
-**Do not tell GUI users to manually paste the first prompt.** When
-`--auto-paste` is active the binary handles delivery itself — your job
-is to run the binary and report that auto-paste fired. If auto-paste
-fails (e.g. macOS Accessibility permission not yet granted), only then
-fall back to printing the kickoff prompt and asking the user to paste
-it manually, plus tell them how to grant the permission so subsequent
-runs work.
+In `cli` and `api` modes the binary drives every stage — no manual
+paste, no agent cooperation needed. Output streams to the terminal as
+each subprocess runs. In `webhook` mode the binary prints a kickoff
+prompt for the user to paste; the AI then self-chains via curl. Use
+this only as a last resort.
 
 Check progress at any time:
 ```bash
