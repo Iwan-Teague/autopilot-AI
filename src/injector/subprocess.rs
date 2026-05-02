@@ -54,6 +54,20 @@ impl PromptInjector for SubprocessInjector {
             tracing::info!("Stage model: <CLI default> — spawning: {} -p <prompt>", self.bin);
         }
 
+        // Bypass interactive approval prompts. Autopilot is non-interactive
+        // by definition — there's no human to click "approve" when the AI
+        // wants to edit a file. Without this flag claude blocks indefinitely
+        // on its first Edit/Write call and the subprocess "succeeds" without
+        // having done any real work.
+        //
+        // The user opted into autonomous operation by running autopilot, so
+        // we set the permission bypass globally for every CLI subprocess.
+        match self.bin.as_str() {
+            "claude"      => { cmd.arg("--dangerously-skip-permissions"); }
+            "codex"       => { cmd.args(["--full-auto"]); }
+            _             => {} // unknown CLI — pass through as-is
+        }
+
         let child = cmd
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
