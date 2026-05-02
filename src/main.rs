@@ -35,8 +35,9 @@ use pipeline::Pipeline;
 )]
 struct Cli {
     /// Path to the pipeline JSON file (generated from your project spec).
+    /// Required for normal runs. Optional for `--test-paste`.
     #[arg(short, long)]
-    pipeline: std::path::PathBuf,
+    pipeline: Option<std::path::PathBuf>,
 
     /// Override the AI interface to use.
     #[arg(short, long, value_enum)]
@@ -79,6 +80,13 @@ struct Cli {
     /// App name to activate for --auto-paste (default "Claude").
     #[arg(long)]
     target_app: Option<String>,
+
+    /// Test the auto-paste path end-to-end without running a pipeline. Pastes
+    /// a unique probe string ("AUTOPILOT_PASTE_PROBE_<id>") into the target
+    /// app and exits. Use this to verify Accessibility permission, focus
+    /// handling, and send-key behaviour before kicking off a real run.
+    #[arg(long, default_value_t = false)]
+    test_paste: bool,
 
     /// Keystroke to send right after the target app activates and before the
     /// paste — used to land focus on the chat input box if it wasn't already.
@@ -135,9 +143,21 @@ async fn main() -> Result<()> {
 
     tracing::info!("autopilot-ai starting");
 
+    // --test-paste: short-circuit before requiring a pipeline.
+    if cli.test_paste {
+        return run_test_paste(
+            cli.target_app.as_deref()
+                .unwrap_or(injector::accessibility::DEFAULT_TARGET_APP),
+            cli.focus_key.as_deref(),
+        );
+    }
+
+    let pipeline_path = cli.pipeline
+        .ok_or_else(|| anyhow::anyhow!("--pipeline is required (or use --test-paste to verify auto-paste only)"))?;
+
     // Load pipeline config.
-    let raw = std::fs::read_to_string(&cli.pipeline)
-        .with_context(|| format!("Reading pipeline file: {}", cli.pipeline.display()))?;
+    let raw = std::fs::read_to_string(&pipeline_path)
+        .with_context(|| format!("Reading pipeline file: {}", pipeline_path.display()))?;
     let mut config: PipelineConfig = serde_json::from_str(&raw)
         .context("Parsing pipeline JSON")?;
 
@@ -185,6 +205,7 @@ async fn main() -> Result<()> {
         };
         tracing::info!("Auto-paste: {}", support);
     }
+
 
     // Branch check — refuse to start if the repo isn't on the expected branch.
     // Skip silently when not in a git repo (someone running outside one).
@@ -237,6 +258,58 @@ async fn main() -> Result<()> {
         InterfaceHint::Webhook => run_webhook(config, state, cli.port).await,
         _ => run_direct(config, state).await,
     }
+}
+
+// ---------------------------------------------------------------------------
+// --test-paste — verify auto-paste end-to-end before running a real pipeline
+// ---------------------------------------------------------------------------
+
+fn run_test_paste(target_app: &str, focus_key: Option<&str>) -> Result<()> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let probe_id = SystemTime::now()
+        .duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let probe = format!("AUTOPILOT_PASTE_PROBE_{}", probe_id);
+
+    println!("{}", "━".repeat(70));
+    println!("  AUTO-PASTE TEST — target app: '{}'", target_app);
+    println!("{}", "━".repeat(70));
+    println!();
+    println!("  This will:");
+    println!("    1. Activate the target app");
+    println!("    2. Paste a unique probe string");
+    println!("    3. Press the configured 'send' key (Cmd/Ctrl+Return)");
+    println!();
+    println!("  Probe text: {}", probe);
+    println!();
+    println!("  WHAT TO LOOK FOR after this exits:");
+    println!("    ✓ Probe appears as a SENT message in '{}'   → all good", target_app);
+    println!("    ⚠ Probe appears in chat input (not sent)      → wrong send-key. Try a different chat app, or open an issue.");
+    println!("    ⚠ Probe appears in editor / file / wrong area → focus landed wrong. Try --focus-key (e.g. cmd+l).");
+    println!("    ✗ Nothing appears anywhere                    → permission denied. Grant Accessibility (System Settings → Privacy & Security → Accessibility) to whichever app launched this binary.");
+    println!();
+
+    let opts = injector::accessibility::PasteOptions {
+        focus_key: focus_key.map(|s| s.to_string()),
+    };
+    let result = injector::accessibility::auto_paste(&probe, target_app, &opts);
+
+    println!("{}", "━".repeat(70));
+    match result {
+        Ok(()) => {
+            println!("  ✓ Paste call returned OK. Check the target app now.");
+            println!();
+            println!("  If the probe doesn't appear correctly, the paste call");
+            println!("  ran but the keystrokes didn't land where expected —");
+            println!("  see the troubleshooting list above.");
+        }
+        Err(e) => {
+            println!("  ✗ Paste call FAILED: {}", e);
+        }
+    }
+    println!("{}", "━".repeat(70));
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
