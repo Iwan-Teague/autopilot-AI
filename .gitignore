@@ -2,3 +2,5 @@
 *-state.json
 autopilot-summary.md
 .DS_Store
+# Stray pipeline.json files written by misdirected runs (user data, not project data)
+/pipeline.json
